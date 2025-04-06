@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Research Results</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 900px; margin: auto; }
+        h1, h2, h3 { color: #333; }
+        pre { background-color: #f4f4f4; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; }
+        .report { border: 1px solid #ddd; padding: 20px; margin-top: 20px; border-radius: 5px; background-color: #f9f9f9; }
+        .error { color: red; border: 1px solid red; padding: 15px; background-color: #ffebeb; }
+        details { margin-bottom: 15px; border: 1px solid #eee; border-radius: 4px; }
+        summary { font-weight: bold; padding: 10px; background-color: #f0f0f0; cursor: pointer; }
+        .details-content { padding: 15px; border-top: 1px solid #eee; background-color: #fff; }
+        .step-keywords { font-style: italic; color: #555; margin-bottom: 10px; }
+        .scraped-urls ul { list-style: disc; margin-left: 20px; }
+         .scraped-urls li { margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Research Results</h1>
+    <a href="/">Start New Research</a>
+    <hr>
+
+    {% if error %}
+        <div class="error">
+            <h2>An Error Occurred</h2>
+            <p>{{ error }}</p>
+        </div>
+    {% else %}
+        <h2>Research Topic</h2>
+        <p>{{ topic }}</p>
+
+        <details>
+            <summary>Research Plan and Execution Details</summary>
+            <div class="details-content">
+                <h3>Generated Research Plan</h3>
+                 {% if plan_details %}
+                    <ol>
+                    {% for step in plan_details %}
+                        <li>
+                            <strong>{{ step.step_description }}</strong><br>
+                            <div class="step-keywords">Keywords: <em>{{ step.keywords | join(', ') }}</em></div>
+                            <div class="scraped-urls">
+                                Scraped URLs for this step:
+                                <ul>
+                                    {% for url in step.urls %}
+                                    <li><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a></li>
+                                    {% else %}
+                                    <li>No URLs were successfully scraped for this step.</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </li>
+                    {% endfor %}
+                    </ol>
+                {% else %}
+                    <p>Could not retrieve research plan details.</p>
+                {% endif %}
+                <h3>Total Scraped Content Size</h3>
+                <p>{{ scraped_content_length }} characters (approx)</p>
+             </div>
+        </details>
+
+
+        <h2>Final Research Report</h2>
+        <div class="report">
+            {{ report_html | safe }}
+        </div>
+
+        <details>
+             <summary>Raw Scraped Content (Truncated)</summary>
+             <div class="details-content">
+                <pre>{{ raw_scraped_data_preview }}</pre>
+                <em>(Showing first 5000 characters)</em>
+             </div>
+        </details>
+
+    {% endif %}
+
+    <hr>
+    <a href="/">Start New Research</a>
+
+</body>
+</html>

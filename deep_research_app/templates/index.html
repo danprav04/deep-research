@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Research Tool</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: auto; }
+        textarea { width: 100%; min-height: 100px; margin-bottom: 10px; }
+        button { padding: 10px 15px; cursor: pointer; }
+        .loading { display: none; margin-top: 20px; }
+        .error { color: red; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <h1>Deep Research Tool</h1>
+    <p>Enter your research topic below. The tool will use AI to create a plan, search the web, analyze results, and generate a report.</p>
+    <form id="research-form" action="/research" method="post">
+        <label for="topic">Research Topic:</label><br>
+        <textarea id="topic" name="topic" required></textarea><br>
+        <button type="submit">Start Research</button>
+    </form>
+    <div id="loading" class="loading">
+        <p><strong>Researching... This may take several minutes. Please wait.</strong></p>
+        <p>Status: <span id="status">Initializing...</span></p>
+        <!-- Add a simple spinner or progress indicator if desired -->
+    </div>
+    <div id="error-message" class="error"></div>
+
+    <script>
+        // Basic loading indicator toggle
+        const form = document.getElementById('research-form');
+        const loadingDiv = document.getElementById('loading');
+        const errorDiv = document.getElementById('error-message');
+        const statusSpan = document.getElementById('status');
+
+        form.addEventListener('submit', () => {
+            loadingDiv.style.display = 'block';
+            errorDiv.textContent = ''; // Clear previous errors
+            statusSpan.textContent = 'Sending request...'; // Initial status
+            // You could potentially use fetch API and update status more dynamically
+            // For simplicity, this just shows "loading" until the page reloads with results.
+        });
+
+         // Function to update status (if using Fetch API later)
+         function updateStatus(message) {
+            if (statusSpan) {
+                statusSpan.textContent = message;
+            }
+        }
+    </script>
+</body>
+</html>
