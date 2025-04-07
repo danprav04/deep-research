@@ -14,7 +14,7 @@ from urllib.parse import quote # For bibliography links
 # --- Configuration --- (Same as before)
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL_NAME = os.getenv("OPENROUTER_MODEL_NAME", "google/gemini-pro-1.5")
+OPENROUTER_MODEL_NAME = os.getenv("OPENROUTER_MODEL_NAME", "google/gemini-2.0-flash-thinking-exp:free")
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 MAX_SEARCH_RESULTS_PER_STEP = 5
 MAX_TOTAL_URLS_TO_SCRAPE = 20 # Slightly reduced for faster demo
@@ -39,25 +39,72 @@ def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
-    # print(f"\n--- Calling LLM --- \nPrompt: {prompt[:500]}...\n-------------------\n") # DEBUG
+
     for attempt in range(max_retries):
         try:
+            # print(f"\n--- Calling LLM --- \nPrompt: {prompt[:500]}...\n-------------------\n") # DEBUG
             completion = client.chat.completions.create(
                 model=OPENROUTER_MODEL_NAME,
                 messages=messages,
-                temperature=0.6, # Slightly lower temp for more factual synthesis/reporting
+                temperature=0.6,
             )
+            # print(f"\n--- LLM Raw Completion Object (Attempt {attempt+1}) --- \n{completion}\n--------------------\n") # DEBUG - Add this temporarily if needed
+
+            # --- START ADDED CHECKS ---
+            if completion is None:
+                print(f"Error: API call returned None object (Attempt {attempt + 1}).")
+                # Raise an error to be caught by the except block below or retry logic
+                raise ValueError("API response object is None.")
+
+            if not completion.choices: # Handles both None and empty list []
+                # Check for finish reason if possible (might be in the completion object directly or needs parsing)
+                finish_reason = "Unknown (No Choices)"
+                if hasattr(completion, 'usage') and hasattr(completion.usage, 'prompt_tokens'): # Basic check if usage exists
+                     # Usually finish_reason is per-choice, but check if it's top-level if choices are missing
+                     pass # No standard place for top-level finish_reason if choices are null/empty
+
+                # Let's print the whole object to see if there are clues
+                print(f"Error: API response missing or empty 'choices' (Attempt {attempt + 1}). Finish Reason: {finish_reason}. Full Response: {completion}")
+
+                # Raise specific errors based on None vs empty list
+                if completion.choices is None:
+                    raise ValueError("API response 'choices' attribute was None.")
+                else: # Empty list
+                    raise ValueError("API response 'choices' attribute was empty. Model might have refused to answer or filtered.")
+
+            # Check the first choice exists (redundant if previous check passed for non-empty list, but safe)
+            if not completion.choices[0]:
+                 print(f"Error: API response choices[0] is invalid (Attempt {attempt + 1}). Full choices: {completion.choices}")
+                 raise ValueError("API response first choice is invalid.")
+
+            # Check message object exists
+            if not completion.choices[0].message:
+                 print(f"Error: API response choice missing 'message' (Attempt {attempt + 1}). Full choice: {completion.choices[0]}")
+                 raise ValueError("API response choice missing 'message' attribute.")
+
+            # Check content exists (can be None if finish_reason is 'content_filter', 'length', etc.)
+            if completion.choices[0].message.content is None:
+                 finish_reason = getattr(completion.choices[0], 'finish_reason', 'Unknown')
+                 print(f"Warning: API response message content is None (Attempt {attempt + 1}). Finish Reason: {finish_reason}. Full message: {completion.choices[0].message}")
+                 # Decide how to handle: return empty string? Raise error?
+                 # For this app, missing content is likely an issue, so raise an error.
+                 raise ValueError(f"API response message content is None (finish reason: {finish_reason}).")
+            # --- END ADDED CHECKS ---
+
+            # If all checks passed, proceed
             response_content = completion.choices[0].message.content.strip()
-            # print(f"\n--- LLM Response --- \nResponse: {response_content[:500]}...\n--------------------\n") # DEBUG
+            # print(f"\n--- LLM Response OK --- \nResponse: {response_content[:500]}...\n--------------------\n") # DEBUG
             return response_content
+
         except Exception as e:
-            print(f"Error calling OpenRouter (Attempt {attempt + 1}/{max_retries}): {e}")
+            # This will now catch ValueErrors raised by our checks too
+            print(f"Error calling OpenRouter or processing response (Attempt {attempt + 1}/{max_retries}): {e}") # Log the specific error
             if attempt < max_retries - 1:
                 print(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
                 print("Max retries reached. Failing LLM call.")
-                raise # Re-raise the exception after final attempt
+                raise # Re-raise the specific exception (e.g., ValueError or original API error)
 
 # parse_research_plan (Same as before, maybe minor prompt tweaks reflected)
 def parse_research_plan(llm_response):
