@@ -12,6 +12,7 @@ from duckduckgo_search import DDGS
 # Use the Markdown library for better footnote support
 import markdown as md_lib
 from urllib.parse import quote
+import traceback # For logging full tracebacks
 
 # --- Configuration ---
 load_dotenv()
@@ -19,10 +20,16 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL_NAME = os.getenv("OPENROUTER_MODEL_NAME", "google/gemini-pro-1.5")
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 MAX_SEARCH_RESULTS_PER_STEP = 5
-MAX_TOTAL_URLS_TO_SCRAPE = 20
+# *** REDUCED MAX SCRAPES TO TEST CONTEXT SIZE ***
+MAX_TOTAL_URLS_TO_SCRAPE = 10 # Reduced from 20
 REQUEST_TIMEOUT = 10
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 PICO_CSS_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"
+
+# --- Custom Exception ---
+class FatalStreamError(Exception):
+    """Custom exception to signal a fatal error that should stop the stream."""
+    pass
 
 # --- Initialize Flask App ---
 app = Flask(__name__)
@@ -35,7 +42,7 @@ client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_API_BASE)
 
 # --- Helper Functions ---
 
-# call_gemini (Robust version from previous iteration)
+# call_gemini (Robust version)
 def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
     """Calls the specified Gemini model via OpenRouter with retry logic."""
     messages = []
@@ -73,10 +80,10 @@ def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
                 print("Max retries reached. Failing LLM call.")
                 raise
 
-# stream_gemini (From previous iteration)
+# stream_gemini (Yields chunks or errors - Refined Error Message)
 def stream_gemini(prompt, system_prompt=None):
     """
-    Calls the Gemini model with streaming enabled and yields content chunks.
+    Calls the Gemini model with streaming enabled and yields content chunks or errors.
     """
     messages = []
     if system_prompt:
@@ -91,18 +98,41 @@ def stream_gemini(prompt, system_prompt=None):
             stream=True,
         )
         for chunk in stream:
-            delta_content = chunk.choices[0].delta.content if chunk.choices and chunk.choices[0].delta else None
+            delta_content = None
+            finish_reason = None
+            if chunk.choices:
+                if chunk.choices[0].delta:
+                    delta_content = chunk.choices[0].delta.content
+                finish_reason = chunk.choices[0].finish_reason
+
             if delta_content:
                 yield {'type': 'chunk', 'content': delta_content} # Yield chunk data
 
-        yield {'type': 'stream_end'}
+            if finish_reason:
+                 print(f"Stream finished with reason: {finish_reason}")
+
+        yield {'type': 'stream_end'} # Signal normal end
 
     except Exception as e:
-        print(f"Error during LLM stream: {e}")
-        yield {'type': 'stream_error', 'message': str(e)}
-        raise
+        # Catch potential API errors during the initial call or connection
+        # *** Refined error message extraction ***
+        error_message = f"Provider returned error during stream: {e}"
+        print(f"Error during LLM stream setup or processing: {e}")
+        # Attempt to get more details if it's an APIError
+        if hasattr(e, 'status_code'):
+            error_message += f" (Status: {e.status_code})"
+        if hasattr(e, 'body') and e.body: # Check if body exists and is not None/empty
+            try:
+                # Attempt to parse body if it looks like JSON
+                error_detail = json.dumps(e.body) if isinstance(e.body, dict) else str(e.body)
+                error_message += f" Details: {error_detail[:200]}..." # Limit detail length
+            except Exception:
+                error_message += f" Details: {str(e.body)[:200]}..." # Fallback to string conversion
 
-# parse_research_plan (Robust version from previous iteration)
+        yield {'type': 'stream_error', 'message': error_message}
+
+
+# parse_research_plan (Robust version)
 def parse_research_plan(llm_response):
     # --- Include the full robust parse_research_plan function here ---
     plan = []
@@ -223,7 +253,7 @@ def parse_research_plan(llm_response):
     return [{"step_description": "Failed to parse plan structure from LLM response", "keywords": []}]
     # --- End of robust parser ---
 
-# search_duckduckgo (Same as before)
+# search_duckduckgo
 def search_duckduckgo(keywords, max_results=MAX_SEARCH_RESULTS_PER_STEP):
     """Performs a search on DuckDuckGo using the library."""
     query = " ".join(keywords)
@@ -236,7 +266,7 @@ def search_duckduckgo(keywords, max_results=MAX_SEARCH_RESULTS_PER_STEP):
         print(f"Error searching DuckDuckGo for '{query}': {e}")
     return urls
 
-# scrape_url (Same as before, returning dict)
+# scrape_url (Returns dict)
 def scrape_url(url):
     """
     Scrapes text content from a given URL.
@@ -281,7 +311,7 @@ def scrape_url(url):
     except Exception as e: print(f"Error parsing or processing URL {url}: {e}")
     return None
 
-# generate_bibliography_map (Same as before)
+# generate_bibliography_map
 def generate_bibliography_map(scraped_sources_list):
     """Creates a map of {url: index} and a numbered list for prompts."""
     url_to_index = {data['url']: i + 1 for i, data in enumerate(scraped_sources_list)}
@@ -309,7 +339,7 @@ def stream():
     """The main SSE route that performs research and streams progress."""
     topic = request.args.get('topic', 'Default Topic')
 
-    # SSE Generator function
+    # SSE Generator function with updated error handling
     def generate_updates():
         scraped_sources_list = []
         all_scraped_urls_set = set()
@@ -317,6 +347,7 @@ def stream():
         research_plan = []
         accumulated_synthesis = ""
         accumulated_report = ""
+        total_scraped_successfully = 0 # Define before scraping loop
 
         def send_event(data):
             """Helper to format and yield SSE events."""
@@ -326,14 +357,15 @@ def stream():
             yield from send_event({'type': 'progress', 'message': message})
 
         def send_error(message, fatal=False):
-            print(f"ERROR: {message}")
-            yield from send_event({'type': 'error', 'message': message})
-            if fatal: raise StopIteration("Fatal error occurred")
+            """Helper to format and yield error updates, raising FatalStreamError if fatal."""
+            print(f"ERROR: {message}") # Log server-side
+            yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
+            if fatal:
+                raise FatalStreamError(message) # Raise custom error
 
         try:
             # === Step 1: Generate Research Plan ===
             yield from send_progress(f"Generating research plan for: '{topic}'...")
-            # *** FIXED F-STRING HERE ***
             plan_prompt = f"""
             Create a concise, 3-4 step research plan for: "{topic}"
             Format STRICTLY as a JSON list of objects with 'step' and 'keywords' keys.
@@ -346,16 +378,16 @@ def stream():
             if not research_plan or (len(research_plan) == 1 and research_plan[0]["step_description"].startswith("Failed")):
                  fail_reason = research_plan[0]["step_description"] if research_plan else "Unknown"
                  raw_snippet = f" Raw: {plan_response[:100]}..." if plan_response else ""
-                 yield from send_error(f"Failed plan: {fail_reason}.{raw_snippet}", fatal=True)
-                 return
+                 yield from send_error(f"Failed plan generation: {fail_reason}.{raw_snippet}", fatal=True)
 
             yield from send_progress(f"Generated {len(research_plan)} step plan:")
             for i, step in enumerate(research_plan):
                  yield from send_progress(f"  {i+1}. {step['step_description']}")
 
+
             # === Step 2: Search and Scrape ===
             yield from send_progress("Starting web search & scraping...")
-            total_scraped_successfully = 0
+            # total_scraped_successfully defined above try block
             for i, step in enumerate(research_plan):
                 step_desc = step.get('step_description', f'Unnamed Step {i+1}')
                 keywords = step.get('keywords', [])
@@ -372,20 +404,21 @@ def stream():
 
                 urls_to_scrape_this_step = 0
                 for url in step_urls:
-                    if total_scraped_successfully >= MAX_TOTAL_URLS_TO_SCRAPE:
-                        yield from send_progress("  -> Max scrape limit reached.")
+                    if total_scraped_successfully >= MAX_TOTAL_URLS_TO_SCRAPE: # Use the global config
+                        yield from send_progress(f"  -> Max scrape limit ({MAX_TOTAL_URLS_TO_SCRAPE}) reached.")
                         break
                     if url in all_scraped_urls_set: continue
                     if url.lower().endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx')):
                          all_scraped_urls_set.add(url)
                          continue
-                    if urls_to_scrape_this_step >= MAX_SEARCH_RESULTS_PER_STEP:
-                        yield from send_progress(f"  -> Step scrape limit reached.")
+                    # Limit actual scraping attempts per step, slightly higher than results to allow for skips
+                    if urls_to_scrape_this_step >= MAX_SEARCH_RESULTS_PER_STEP + 2:
+                        yield from send_progress(f"  -> Step scrape attempt limit reached.")
                         break
 
                     all_scraped_urls_set.add(url)
                     urls_to_scrape_this_step += 1
-                    yield from send_progress(f"  -> Scraping ({urls_to_scrape_this_step}/{MAX_SEARCH_RESULTS_PER_STEP}): {url[:70]}...")
+                    yield from send_progress(f"  -> Scraping ({urls_to_scrape_this_step}): {url[:70]}...")
                     scraped_data = scrape_url(url)
 
                     if scraped_data and isinstance(scraped_data, dict) and scraped_data.get('content'):
@@ -394,12 +427,17 @@ def stream():
                          total_scraped_successfully += 1
                          yield from send_progress(f"    -> OK ({len(scraped_data['content'])} chars). Total: {total_scraped_successfully}")
                 plan_details_for_template.append({**step, "urls": step_scraped_urls_list, "keywords": keywords})
+                # Check again after each step if max is reached
+                if total_scraped_successfully >= MAX_TOTAL_URLS_TO_SCRAPE:
+                    yield from send_progress(f"  -> Max scrape limit ({MAX_TOTAL_URLS_TO_SCRAPE}) reached overall.")
+                    break # Exit the step loop
                 time.sleep(0.2)
 
             if not scraped_sources_list:
                 yield from send_error("Failed to scrape any content.", fatal=True)
-                return
+
             yield from send_progress(f"Finished scraping. Total successful: {total_scraped_successfully}")
+
 
             # === Bibliography Map ===
             url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_sources_list)
@@ -411,8 +449,13 @@ def stream():
             context_for_llm_structured = scraped_sources_list
             estimated_chars = sum(len(item['content']) for item in context_for_llm_structured)
             yield from send_progress(f"  -> Context size: ~{estimated_chars // 1000}k chars")
+            # Optional: Add truncation here if estimated_chars is still too high
+            # MAX_SYNTHESIS_CHARS = 250000 # Example limit
+            # if estimated_chars > MAX_SYNTHESIS_CHARS:
+            #    yield from send_progress(f"   -> Context too large, truncating to ~{MAX_SYNTHESIS_CHARS} chars for synthesis.")
+            #    # Implement truncation logic (e.g., take first N items, or first X chars of each item)
+            #    # This example doesn't implement the truncation logic itself.
 
-            # Note: Synthesis prompt uses regular f-string interpolation safely here
             synthesis_prompt = f"""
             Analyze scraped content about "{topic}" based on the plan, citing sources.
             Research Plan: {json.dumps(research_plan, indent=2)}
@@ -420,29 +463,22 @@ def stream():
             Instructions: For each plan step, synthesize relevant info. **Crucially:** Cite every fact with `[Source URL: http://...]` immediately after. Output ONLY the Markdown synthesis per step, separated by ---. If nothing found, state it. No intro/summary here.
             """
             accumulated_synthesis = ""
-            try:
-                stream_generator = stream_gemini(synthesis_prompt)
-                for result in stream_generator:
-                    if result['type'] == 'chunk':
-                        yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'synthesis'})
-                        accumulated_synthesis += result['content']
-                    elif result['type'] == 'stream_error':
-                        yield from send_error(f"LLM stream error during synthesis: {result['message']}", fatal=True)
-                        return
-            except Exception as e:
-                 yield from send_error(f"Error processing LLM synthesis stream: {e}", fatal=True)
-                 return
+            stream_generator = stream_gemini(synthesis_prompt)
+            for result in stream_generator:
+                if result['type'] == 'chunk':
+                    yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'synthesis'})
+                    accumulated_synthesis += result['content']
+                elif result['type'] == 'stream_error':
+                    yield from send_error(f"LLM stream error during synthesis: {result['message']}", fatal=True)
 
             yield from send_progress("Synthesis stream finished.")
             if not accumulated_synthesis.strip():
                  yield from send_error("Synthesis resulted in empty content.", fatal=True)
-                 return
+
 
             # === Step 4: Generate Final Report (Streaming) ===
             yield from send_progress("Generating final report (AI Generating...)")
             yield from send_event({'type': 'stream_start', 'target': 'report'})
-
-            # Note: Report prompt uses regular f-string interpolation safely here
             report_prompt = f"""
             Create a Markdown research report on "{topic}".
             Plan: {json.dumps(research_plan, indent=2)}
@@ -451,33 +487,26 @@ def stream():
             Instructions: Write Intro, Findings (per plan step), Conclusion. **Replace** `[Source URL: http://...]` with footnote markers `[^N]` based on the Bibliography Map. Append a `## Bibliography` section listing sources as `[^N]: [URL](URL)`. Output ONLY the final Markdown report.
             """
             accumulated_report = ""
-            try:
-                stream_generator = stream_gemini(report_prompt)
-                for result in stream_generator:
-                    if result['type'] == 'chunk':
-                        yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'report'})
-                        accumulated_report += result['content']
-                    elif result['type'] == 'stream_error':
-                        yield from send_error(f"LLM stream error during report generation: {result['message']}", fatal=True)
-                        return
-            except Exception as e:
-                 yield from send_error(f"Error processing LLM report stream: {e}", fatal=True)
-                 return
+            stream_generator = stream_gemini(report_prompt)
+            for result in stream_generator:
+                if result['type'] == 'chunk':
+                    yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'report'})
+                    accumulated_report += result['content']
+                elif result['type'] == 'stream_error':
+                    yield from send_error(f"LLM stream error during report generation: {result['message']}", fatal=True)
 
             yield from send_progress("Report stream finished.")
             if not accumulated_report.strip():
                  yield from send_error("Report generation resulted in empty content.", fatal=True)
-                 return
 
-            # Convert final accumulated report Markdown to HTML
+
+            # === Final Conversion and Completion ===
             try:
                 report_html = md_lib.markdown(accumulated_report, extensions=['footnotes', 'fenced_code', 'tables', 'nl2br'])
             except Exception as md_err:
-                 yield from send_error(f"Failed to convert final Markdown report to HTML: {md_err}")
-                 report_html = f"<pre>{accumulated_report}</pre>"
+                 yield from send_error(f"Failed to convert final Markdown report to HTML: {md_err}", fatal=False)
+                 report_html = f"<pre>--- MARKDOWN CONVERSION FAILED ---\n\n{accumulated_report}</pre>"
 
-
-            # --- Send Final Completion Event ---
             final_data = {
                 'type': 'complete',
                 'report_html': report_html,
@@ -485,15 +514,19 @@ def stream():
             }
             yield from send_event(final_data)
 
-        except StopIteration:
-             yield from send_progress("Process stopped due to fatal error.")
+        # --- Main Exception Handling ---
+        except FatalStreamError as fse:
+            print(f"Terminating stream cleanly due to fatal error: {fse}")
+            return # Exit the generator function normally
         except Exception as e:
             print(f"An unexpected error occurred during stream generation: {e}")
-            import traceback
-            traceback.print_exc()
+            traceback.print_exc() # Print full traceback server-side
             error_msg = f"Unexpected server error: {type(e).__name__} - {e}"
-            yield from send_event({'type': 'error', 'message': error_msg})
+            # Use yield directly to avoid potential loops if send_error itself fails
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+            return # Exit generator
 
+    # Return the generator function wrapped in a Response object for SSE
     return Response(stream_with_context(generate_updates()), content_type='text/event-stream')
 
 
