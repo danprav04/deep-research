@@ -17,8 +17,9 @@ import markdown as md_lib
 from urllib.parse import quote, unquote
 import concurrent.futures
 from io import BytesIO
-
 # --- NEW: Import html2docx for DOCX conversion ---
+import traceback # Import traceback for detailed error logging
+
 DOCX_CONVERSION_AVAILABLE = False
 try:
     from html2docx import Html2Docx
@@ -64,7 +65,7 @@ except Exception as e:
 
 # --- Helper Functions ---
 
-# --- REFACTORED: call_gemini (unchanged from previous good version) ---
+# --- REFACTORED: call_gemini (unchanged) ---
 def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
     """Calls the specified Google Gemini model with retry logic."""
     full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
@@ -127,7 +128,7 @@ def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
                 print("Max retries reached. Failing LLM call.")
                 raise
 
-# --- REFACTORED: stream_gemini (unchanged from previous good version) ---
+# --- REFACTORED: stream_gemini (unchanged) ---
 def stream_gemini(prompt, system_prompt=None):
     """
     Calls the Google Gemini model with streaming enabled and yields content chunks.
@@ -188,7 +189,6 @@ def stream_gemini(prompt, system_prompt=None):
     except Exception as e:
         print(f"Error during Google Gemini stream: {e}")
         error_message = f"LLM stream error: {e}"
-        # ... (rest of error handling unchanged) ...
         if "API key not valid" in str(e):
             error_message = f"LLM stream error: Invalid Google API Key. ({e})"
         elif "quota" in str(e).lower():
@@ -201,9 +201,9 @@ def stream_gemini(prompt, system_prompt=None):
         yield {'type': 'stream_error', 'message': error_message}
 
 
-# --- parse_research_plan (unchanged from previous good version) ---
+# --- parse_research_plan (unchanged) ---
 def parse_research_plan(llm_response):
-    # ... (keep the robust parser from previous step) ...
+    # ... (parsing logic remains the same) ...
     plan = []
     if not llm_response:
         print("Error: Received empty response from LLM for plan generation.")
@@ -319,8 +319,7 @@ def parse_research_plan(llm_response):
     return [{"step_description": fail_msg, "keywords": []}]
 
 
-# --- NEW: Search Provider Functions ---
-
+# --- Search Provider Functions (unchanged) ---
 def search_duckduckgo_provider(keywords, max_results=MAX_SEARCH_RESULTS_PER_ENGINE_STEP, max_retries=2, retry_delay=DDGS_RETRY_DELAY_SECONDS):
     """Performs a search on DuckDuckGo with retry."""
     query = " ".join(keywords)
@@ -352,49 +351,7 @@ def search_duckduckgo_provider(keywords, max_results=MAX_SEARCH_RESULTS_PER_ENGI
 
     return {"engine": "DuckDuckGo", "urls": [], "success": False, "error": "Max retries reached unexpectedly."}
 
-
-# --- EXAMPLE: Placeholder for Google Search API (Requires setup) ---
-# def search_google_provider(keywords, max_results=MAX_SEARCH_RESULTS_PER_ENGINE_STEP):
-#     """ Placeholder for Google Custom Search API. Requires API Key and CX ID."""
-#     # Requires: pip install google-api-python-client
-#     # from googleapiclient.discovery import build
-#     # GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
-#     # GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID") # Custom Search Engine ID
-#     # if not GOOGLE_SEARCH_API_KEY or not GOOGLE_CSE_ID:
-#     #     print("  -> Skipping Google Search: GOOGLE_SEARCH_API_KEY or GOOGLE_CSE_ID not set in .env")
-#     #     return {"engine": "Google", "urls": [], "success": False, "error": "API Key/CX ID missing"}
-#
-#     query = " ".join(keywords)
-#     print(f"  -> Searching Google (API) for: '{query}' (max_results={max_results})")
-#     urls = []
-#     try:
-#         # See: https://developers.google.com/custom-search/v1/using_rest
-#         # Service object handles API calls, retries, etc.
-#         service = build("customsearch", "v1", developerKey=GOOGLE_SEARCH_API_KEY)
-#         # Google API max results per call is 10. Need multiple calls for more.
-#         results_to_fetch = min(max_results, 10) # Fetch up to 10 per call initially
-#         res = service.cse().list(
-#             q=query,
-#             cx=GOOGLE_CSE_ID,
-#             num=results_to_fetch,
-#             # start=1 # For pagination if needed
-#         ).execute()
-#
-#         items = res.get('items', [])
-#         urls = [item['link'] for item in items if 'link' in item]
-#         print(f"  -> Google Found {len(urls)} URLs for '{query}'")
-#         return {"engine": "Google", "urls": urls, "success": True, "error": None}
-#
-#     except Exception as e:
-#         err_msg = f"Error searching Google API for '{query}': {e}"
-#         print(f"  -> {err_msg}")
-#         # Check for common errors like quota
-#         if "quota" in str(e).lower():
-#              err_msg += " (Quota Exceeded?)"
-#         return {"engine": "Google", "urls": [], "success": False, "error": err_msg}
-
-
-# --- NEW: Unified Search Function ---
+# --- Unified Search Function (unchanged) ---
 def perform_web_search(keywords, max_results_per_engine=MAX_SEARCH_RESULTS_PER_ENGINE_STEP):
     """
     Performs searches using configured providers and aggregates unique results.
@@ -403,7 +360,6 @@ def perform_web_search(keywords, max_results_per_engine=MAX_SEARCH_RESULTS_PER_E
     search_errors = []
 
     # Define the search providers to use
-    # Add more provider functions here (like search_google_provider) if implemented and configured
     search_providers = [
         search_duckduckgo_provider,
         # search_google_provider, # Uncomment if implemented and API keys are set
@@ -430,8 +386,7 @@ def perform_web_search(keywords, max_results_per_engine=MAX_SEARCH_RESULTS_PER_E
 
     return list(all_unique_urls), search_errors
 
-
-# --- scrape_url (unchanged from previous good version) ---
+# --- scrape_url (unchanged) ---
 def scrape_url(url):
     """
     Scrapes text content from a given URL. Handles common errors.
@@ -445,14 +400,12 @@ def scrape_url(url):
 
         content_type = response.headers.get('content-type', '').lower()
         if 'html' not in content_type and 'text' not in content_type:
-            # print(f"Skipping non-HTML/text content: {log_url} (Type: {content_type})") # Less verbose
             response.close()
             return None
 
         content_length = response.headers.get('content-length')
         MAX_CONTENT_LENGTH_MB = 10
         if content_length and int(content_length) > MAX_CONTENT_LENGTH_MB * 1024 * 1024:
-            # print(f"Skipping large file (>{MAX_CONTENT_LENGTH_MB}MB): {log_url}") # Less verbose
             response.close()
             return None
 
@@ -460,7 +413,6 @@ def scrape_url(url):
         response.close()
 
         if not content_length and len(html_content) > MAX_CONTENT_LENGTH_MB * 1024 * 1024:
-             # print(f"Skipping large file discovered after download (>{MAX_CONTENT_LENGTH_MB}MB): {log_url}") # Less verbose
              return None
 
         try:
@@ -518,7 +470,6 @@ def scrape_url(url):
 
     return None
 
-
 # --- generate_bibliography_map (unchanged) ---
 def generate_bibliography_map(scraped_sources_list):
     """Creates a map of {url: index} and a numbered list for prompts."""
@@ -552,8 +503,9 @@ def stream():
         topic = "Default Topic - No Topic Provided"
 
     def generate_updates():
+        # --- Research state variables (unchanged) ---
         scraped_sources_list = []
-        all_found_urls_set = set() # Tracks URLs selected for scraping
+        all_found_urls_set = set()
         urls_to_scrape_list = []
         research_plan = []
         accumulated_synthesis = ""
@@ -561,6 +513,7 @@ def stream():
         url_to_index_map = {}
         start_time_total = time.time()
 
+        # --- SSE Helper functions (unchanged) ---
         def send_event(data):
             try:
                 payload = json.dumps(data)
@@ -582,7 +535,7 @@ def stream():
             yield from send_event({'type': 'error', 'message': message})
 
         try:
-            # === Step 1: Generate Research Plan ===
+            # === Step 1: Generate Research Plan (unchanged) ===
             yield from send_progress(f"Generating research plan for: '{topic}' using {GOOGLE_MODEL_NAME}...")
             plan_prompt = f"""
             Create a detailed, step-by-step research plan with 5-10 distinct steps for the topic: "{topic}"
@@ -602,7 +555,7 @@ def stream():
 
             Ensure the output is ONLY the valid JSON list inside the markdown block. No introductory text, no explanations outside the JSON block.
             Generate 5 to 10 relevant steps for the specific topic: "{topic}".
-            """ # Reduced step count slightly
+            """
             try:
                 plan_response = call_gemini(plan_prompt)
             except Exception as e:
@@ -610,7 +563,6 @@ def stream():
                  return
 
             research_plan = parse_research_plan(plan_response)
-            # ... (rest of plan parsing/validation unchanged) ...
             if not research_plan or not isinstance(research_plan, list) or not all(isinstance(step, dict) and 'step_description' in step and 'keywords' in step for step in research_plan) or \
                (len(research_plan) == 1 and research_plan[0]["step_description"].startswith("Failed")):
                  fail_reason = "Could not parse valid plan structure."
@@ -621,10 +573,11 @@ def stream():
                  return
 
             yield from send_progress(f"Generated {len(research_plan)} step plan:")
-            # ... (log plan steps unchanged) ...
+            for i, step in enumerate(research_plan):
+                 yield from send_progress(f"  Step {i+1}: {step['step_description']} (Keywords: {step['keywords']})")
 
 
-            # === Step 2a: Search and Collect URLs (Using unified search) ===
+            # === Step 2a: Search and Collect URLs (unchanged) ===
             yield from send_progress("Starting web search to collect URLs...")
             start_search_time = time.time()
             urls_collected_count = 0
@@ -649,8 +602,6 @@ def stream():
 
                 if step_search_errors:
                     total_search_errors += len(step_search_errors)
-                    # Log specific errors if needed, already printed in perform_web_search
-                    # for err in step_search_errors: yield from send_progress(f"  -> Search Error: {err}")
 
                 before_count = len(all_urls_from_search_step)
                 all_urls_from_search_step.update(step_search_results_urls)
@@ -665,34 +616,28 @@ def stream():
             yield from send_progress(f"Search phase completed in {time.time() - start_search_time:.2f}s.")
             yield from send_progress(f"Found {len(all_urls_from_search_step)} total unique URL results across {total_search_queries} search queries ({total_search_errors} engine errors encountered).")
 
-            # --- Filtering (Logic remains the same, applied to the unique set) ---
+            # --- Filtering (unchanged) ---
             yield from send_progress(f"Processing {len(all_urls_from_search_step)} unique URLs for filtering...")
             urls_to_scrape_list = [] # Reset list
             all_found_urls_set = set() # Reset set tracking *selected* URLs
 
-            # Convert set back to list for consistent processing order (optional but good)
             sorted_unique_urls = sorted(list(all_urls_from_search_step))
 
             for url in sorted_unique_urls:
                  if urls_collected_count >= MAX_TOTAL_URLS_TO_SCRAPE:
                       yield from send_progress(f"  -> Reached URL collection limit ({MAX_TOTAL_URLS_TO_SCRAPE}).")
                       break
-                 # Filtering logic (file types, protocols, etc.) - unchanged
                  is_file = url.lower().split('?')[0].split('#')[0].endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx', '.webp', '.svg', '.xml', '.css', '.js', '.jpeg', '.doc', '.xls', '.ppt', '.txt', '.exe', '.dmg', '.iso', '.rar'))
                  is_mailto = url.lower().startswith('mailto:')
                  is_javascript = url.lower().startswith('javascript:')
                  is_ftp = url.lower().startswith('ftp:')
                  is_tel = url.lower().startswith('tel:')
                  is_valid_http = url.startswith(('http://', 'https://'))
-                 # is_social_media = ... # Add if desired
 
                  if is_valid_http and not is_file and not is_mailto and not is_javascript and not is_ftp and not is_tel:
                       urls_to_scrape_list.append(url)
                       all_found_urls_set.add(url) # Track added URLs
                       urls_collected_count += 1
-                 # else: # Debugging skipped URLs
-                 #    reason = "file" #... etc
-                 #    yield from send_progress(f"  -> Skipping filtered URL ({reason}): {url[:70]}...")
 
             yield from send_progress(f"Selected {len(urls_to_scrape_list)} valid, filtered URLs for scraping (limit: {MAX_TOTAL_URLS_TO_SCRAPE}).")
 
@@ -700,8 +645,7 @@ def stream():
                  yield from send_error_event("No suitable URLs found to scrape after searching and filtering.")
                  return
 
-            # === Step 2b: Scrape URLs Concurrently ===
-            # ... (Scraping logic unchanged, uses urls_to_scrape_list) ...
+            # === Step 2b: Scrape URLs Concurrently (unchanged) ===
             yield from send_progress(f"Starting concurrent scraping of {len(urls_to_scrape_list)} URLs (Max workers: {MAX_WORKERS})...")
             start_scrape_time = time.time()
             total_scraped_successfully = 0
@@ -739,11 +683,10 @@ def stream():
             ordered_scraped_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
             scraped_sources_list = ordered_scraped_list
 
-            # === Bibliography Map ===
+            # === Bibliography Map (unchanged) ===
             url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_sources_list)
 
-            # === Step 3: Synthesize with Citations (Streaming) ===
-            # ... (Context preparation, truncation, prompt, and streaming logic unchanged) ...
+            # === Step 3: Synthesize with Citations (Streaming) (unchanged) ===
             yield from send_progress(f"Synthesizing relevant information using {GOOGLE_MODEL_NAME}...")
             yield from send_event({'type': 'stream_start', 'target': 'synthesis'})
 
@@ -807,25 +750,26 @@ def stream():
                         synthesis_stream_error = result['message']
                         yield from send_error_event(f"LLM stream error during synthesis ({GOOGLE_MODEL_NAME}): {synthesis_stream_error}")
                         if "API key" in synthesis_stream_error or "quota" in synthesis_stream_error.lower(): return
-                        return
+                        # Allow continuing to report generation even if synthesis had minor issues
+                        break
                     elif result['type'] == 'stream_warning':
                          yield from send_progress(f"LLM Stream Warning (Synthesis): {result['message']}")
                     elif result['type'] == 'stream_end':
                          yield from send_progress(f"Synthesis stream finished.")
                          break
-                if synthesis_stream_error: return
+                # Dont return here if error was just a warning or non-fatal
 
             except Exception as e:
                  yield from send_error_event(f"Fatal error processing LLM synthesis stream: {e}")
-                 import traceback; traceback.print_exc(); return
+                 traceback.print_exc(); return # Fatal error
 
             yield from send_progress(f"Synthesis generation completed.")
-            if not accumulated_synthesis.strip():
-                 yield from send_error_event("Synthesis resulted in empty content.")
-                 return
+            if not accumulated_synthesis.strip() and not synthesis_stream_error: # Check only if no error stopped it
+                 yield from send_progress("Warning: Synthesis resulted in empty content. Proceeding to report generation.")
+                 # Don't return, allow report generation to attempt
 
-            # === Step 4: Generate Final Report (Streaming) ===
-            # ... (Report prompt preparation, truncation, prompt, and streaming logic unchanged) ...
+
+            # === Step 4: Generate Final Report (Streaming) (unchanged) ===
             yield from send_progress(f"Generating final report using {GOOGLE_MODEL_NAME}...")
             yield from send_event({'type': 'stream_start', 'target': 'report'})
 
@@ -850,20 +794,20 @@ def stream():
                ```
             2. Synthesized Information with Raw URL Citations:
                ```markdown
-               {truncated_synthesis}
+               {truncated_synthesis if truncated_synthesis.strip() else "No synthesized information was generated."}
                ```
             3. Bibliography Map (URL to Reference Number - {len(url_to_index_map)} sources):
                ```
-               {bibliography_prompt_list}
+               {bibliography_prompt_list if bibliography_prompt_list else "No sources available for bibliography."}
                ```
 
             Instructions:
             1. Write a final Markdown report with sections: `# Research Report: {topic}`, `## Introduction`, `## Findings`, `## Conclusion`, `## Bibliography`.
             2. **Introduction**: Introduce "{topic}", state the report's purpose, outline research scope (plan steps).
-            3. **Findings**: Organize by plan step (`### Step X: <Description>`). Integrate synthesized info for each step.
+            3. **Findings**: Organize by plan step (`### Step X: <Description>`). Integrate synthesized info for each step. If synthesis was empty, state this clearly.
             4. **CRITICAL CITATION**: Replace EVERY `[Source URL: <full_url_here>]` with its corresponding Markdown footnote `[^N]`. Use the Bibliography Map for the number N. If a URL isn't in the map, OMIT the citation marker.
-            5. **Conclusion**: Summarize key findings. Mention limitations (missing info, source count, etc.). Suggest further research.
-            6. **Bibliography**: List sources from the map numerically using Markdown footnote definitions: `[^N]: <full_url_here>`.
+            5. **Conclusion**: Summarize key findings (or lack thereof if synthesis failed). Mention limitations (e.g., empty synthesis, source count, potential scraping issues). Suggest further research if appropriate.
+            6. **Bibliography**: List sources from the map numerically using Markdown footnote definitions: `[^N]: <full_url_here>`. If no sources, state "No sources cited."
             7. Output ONLY the complete Markdown report. No extra commentary.
             """
             final_report_markdown = ""
@@ -877,30 +821,34 @@ def stream():
                     elif result['type'] == 'stream_error':
                         report_stream_error = result['message']
                         yield from send_error_event(f"LLM stream error during report generation ({GOOGLE_MODEL_NAME}): {report_stream_error}")
-                        if "API key" in report_stream_error or "quota" in report_stream_error.lower(): return
-                        return
+                        if "API key" in report_stream_error or "quota" in report_stream_error.lower(): return # Fatal
+                        break # Non-fatal, break loop
                     elif result['type'] == 'stream_warning':
                          yield from send_progress(f"LLM Stream Warning (Report): {result['message']}")
                     elif result['type'] == 'stream_end':
                          yield from send_progress(f"Report stream finished.")
                          break
-                if report_stream_error: return
+                # Continue even if non-fatal stream error occurred
 
             except Exception as e:
                  yield from send_error_event(f"Fatal error processing LLM report stream: {e}")
-                 import traceback; traceback.print_exc(); return
+                 traceback.print_exc(); return # Fatal
 
             yield from send_progress(f"Report generation completed.")
             if not final_report_markdown.strip():
-                 yield from send_error_event("Report generation resulted in empty content.")
-                 return
+                 # Check if we expected content based on input
+                 if accumulated_synthesis.strip() or bibliography_prompt_list:
+                     yield from send_error_event("Report generation resulted in empty content despite having input synthesis/sources.")
+                 else:
+                     yield from send_progress("Report generation resulted in empty content (as expected due to lack of synthesis/sources).")
+                 # Don't return here, send the empty report structure
 
-            # --- Final Processing and Completion ---
+            # --- Final Processing and Completion (unchanged) ---
             yield from send_progress("Processing final report for display...")
 
             try:
                 report_html = md_lib.markdown(
-                    final_report_markdown,
+                    final_report_markdown if final_report_markdown.strip() else "# Research Report\n\n*No content generated.*",
                     extensions=['footnotes', 'fenced_code', 'tables', 'nl2br', 'attr_list', 'md_in_html']
                 )
             except Exception as md_err:
@@ -927,16 +875,15 @@ def stream():
                 'report_html': report_html,
                 'report_markdown': final_report_markdown,
                 'raw_scraped_data_preview': raw_data_preview,
-                'docx_available': DOCX_CONVERSION_AVAILABLE # Use the new flag
+                'docx_available': DOCX_CONVERSION_AVAILABLE # Use the flag
             }
             yield from send_event(final_data)
             end_time_total = time.time()
-            yield from send_progress(f"Research process completed successfully in {end_time_total - start_time_total:.2f} seconds.")
+            yield from send_progress(f"Research process completed in {end_time_total - start_time_total:.2f} seconds.")
 
         except Exception as e:
             print(f"An unexpected error occurred during stream generation: {e}")
-            import traceback
-            traceback.print_exc()
+            traceback.print_exc() # Print full traceback
             error_msg = f"Unexpected server error: {type(e).__name__} - {e}"
             yield from send_error_event(error_msg)
         finally:
@@ -963,9 +910,7 @@ def download_docx():
         return jsonify({"success": False, "message": "Error: No Markdown content received."}), 400
 
     try:
-        # 1. Convert Markdown to HTML first (using the same method as for display)
-        # This ensures footnotes and other Markdown features are processed.
-        # Note: Styling might differ slightly in DOCX compared to browser render.
+        # 1. Convert Markdown to HTML first
         report_html = md_lib.markdown(
             markdown_content,
             extensions=['footnotes', 'fenced_code', 'tables', 'nl2br', 'attr_list', 'md_in_html']
@@ -973,16 +918,8 @@ def download_docx():
 
         # 2. Convert HTML string to DOCX using html2docx
         parser = Html2Docx()
-        # The parser needs a base path for relative links if any, we can use '.'
-        # Or handle it more robustly if needed, but often not necessary for self-contained reports.
-        # Let's parse the string directly.
-        # Note: html2docx saves to a file by default, we want bytes.
-        # We'll parse, then write to a BytesIO buffer.
-
-        # Create an in-memory buffer
         buffer = BytesIO()
         parser.parse_html_string(report_html)
-        # The result is stored in parser.docx, which is a python-docx document object
         parser.docx.save(buffer) # Save the python-docx object to the buffer
         buffer.seek(0) # Rewind the buffer
 
@@ -1000,9 +937,9 @@ def download_docx():
         )
 
     except Exception as e:
-        print(f"Error converting Markdown to DOCX using html2docx: {e}")
-        import traceback
-        traceback.print_exc() # Print full traceback for debugging
+        print(f"Error converting Markdown to DOCX using html2docx:")
+        # --- MODIFIED: Print traceback for detailed error info ---
+        traceback.print_exc()
         msg = f"An error occurred during DOCX conversion: {e}"
         return jsonify({"success": False, "message": msg}), 500
 
@@ -1012,9 +949,6 @@ if __name__ == '__main__':
     # Ensure libraries are installed:
     # pip install Flask python-dotenv google-generativeai duckduckgo-search beautifulsoup4 requests lxml Markdown html2docx flask[async]
     # Set GOOGLE_API_KEY in your .env file
-    # Optionally add GOOGLE_SEARCH_API_KEY and GOOGLE_CSE_ID if implementing Google Search
     print(f"Using Google Model: {GOOGLE_MODEL_NAME}")
     print(f"DOCX conversion available (html2docx): {DOCX_CONVERSION_AVAILABLE}")
-    # Recommended: Use a production WSGI server like gunicorn or uwsgi
-    # gunicorn --workers 4 --threads 2 --bind 0.0.0.0:5001 your_script_name:app
     app.run(debug=True, host='0.0.0.0', port=5001, threaded=True)

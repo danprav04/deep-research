@@ -36,13 +36,23 @@
             border-radius: var(--pico-border-radius);
             background-color: var(--pico-contrast-hover);
             display: none;
-            white-space: pre-wrap;
-            word-wrap: break-word;
             font-family: monospace;
             font-size: 0.9em;
             max-height: 400px;
             overflow-y: auto;
+            /* --- MODIFIED: Ensure wrapping for stream content --- */
+            white-space: pre-wrap;    /* Wrap lines but preserve line breaks/spaces */
+            word-wrap: break-word;    /* Force break long words/URLs */
+            overflow-wrap: break-word;/* Alias for word-wrap, broader compatibility */
         }
+        /* --- NEW: Explicitly target pre tags inside stream container --- */
+        .stream-container pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            margin: 0; /* Remove default pre margin */
+        }
+
         .stream-container h4 { margin-top: 0; color: var(--pico-primary); }
         #final-report-container { margin-top: 2rem; }
         #final-report-content {
@@ -50,9 +60,22 @@
             padding: 1.5rem;
             border-radius: var(--pico-border-radius);
             border: 1px solid var(--pico-card-border-color);
+            /* --- NEW: Add wrapping for final report content --- */
+            word-wrap: break-word;
+            overflow-wrap: break-word;
          }
         #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; border-bottom: 1px solid var(--pico-muted-border-color); padding-bottom: 0.2em; }
         #final-report-content h1:first-child, #final-report-content h2:first-child { margin-top: 0; }
+        /* --- NEW: Add wrapping specifically for pre tags within final report --- */
+        #final-report-content pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            background-color: var(--pico-contrast); /* Optional: Style code blocks */
+            padding: 1em;
+            border-radius: var(--pico-border-radius);
+            overflow-x: auto; /* Add horizontal scroll if absolutely needed, but wrap preferred */
+        }
         /* --- Modified footnote link style for better visibility --- */
         #final-report-content sup a {
             text-decoration: none;
@@ -154,7 +177,7 @@
              <hr>
             <h2>Final Research Report</h2>
 
-            <!-- NEW: Download Form -->
+            <!-- Download Form -->
             <form id="download-form" action="/download_docx" method="post" style="display: none;">
                  <p>Download the report:</p>
                  <!-- Hidden field to store raw Markdown -->
@@ -162,7 +185,8 @@
                  <!-- Hidden field for topic (used for filename) -->
                  <input type="hidden" name="topic" value="{{ topic|e }}">
                  <button type="submit" id="download-docx-button">Download as DOCX</button>
-                 <small id="docx-unavailable-msg" style="display: none; color: var(--pico-muted-color); margin-left: 1rem;">DOCX download requires Pandoc on the server.</small>
+                 <!-- --- MODIFIED: Corrected library name in message --- -->
+                 <small id="docx-unavailable-msg" style="display: none; color: var(--pico-muted-color); margin-left: 1rem;">DOCX download requires the 'html2docx' library on the server.</small>
             </form>
 
             <div id="final-report-content">
@@ -194,7 +218,7 @@
         const reportStreamContainer = document.getElementById('report-stream-container');
         const reportStreamContent = document.getElementById('report-stream-content');
 
-        // --- NEW: Download elements ---
+        // Download elements
         const downloadForm = document.getElementById('download-form');
         const downloadDocxButton = document.getElementById('download-docx-button');
         const docxUnavailableMsg = document.getElementById('docx-unavailable-msg');
@@ -253,8 +277,7 @@
                         errorMessage.textContent = errorMsgText;
                         errorContainer.style.display = 'block';
                         progressArea.removeAttribute('aria-busy');
-                        // Consider closing eventSource on fatal errors if needed
-                        // eventSource.close();
+                        // Don't close eventSource on all errors, maybe recoverable
                         break;
                     case 'stream_start':
                          currentStreamTarget = data.target;
@@ -278,7 +301,7 @@
                         progressArea.removeAttribute('aria-busy');
                         finalReportContent.innerHTML = data.report_html;
 
-                        // --- NEW: Handle download section ---
+                        // Handle download section
                         if (data.report_markdown) {
                             rawMarkdownReport.value = data.report_markdown; // Store raw markdown
                             if (data.docx_available) {
@@ -286,9 +309,10 @@
                                 downloadDocxButton.disabled = false;
                                 docxUnavailableMsg.style.display = 'none';
                             } else {
-                                // Pandoc not available on server
+                                // html2docx not available on server
                                 downloadForm.style.display = 'block'; // Still show section
                                 downloadDocxButton.disabled = true; // Disable button
+                                // --- MODIFIED: Ensure correct message is displayed ---
                                 docxUnavailableMsg.style.display = 'inline'; // Show warning
                             }
                         } else {
@@ -305,6 +329,11 @@
 
                         eventSource.close(); // Research is done, close connection
                         break;
+                    case 'stream_terminated': // Added to handle graceful close from server finally block
+                        addProgress("Server stream terminated.", false);
+                        progressArea.removeAttribute('aria-busy');
+                        if (eventSource) eventSource.close();
+                        break;
                 }
             } catch (e) {
                 console.error("Error parsing SSE data:", e, "Raw data:", event.data); // Log raw data on error
@@ -318,13 +347,14 @@
                  addProgress("Server connection closed.", false);
             } else if (eventSource.readyState === EventSource.CONNECTING) {
                  addProgress("Connection lost, attempting to reconnect...", true);
+                 // No need to display the big error message yet, browser might reconnect
             } else {
                 const errorMsg = "Connection to server lost or failed unexpectedly. Please try starting new research.";
                 addProgress(errorMsg, true);
                 errorMessage.textContent = errorMsg;
                 errorContainer.style.display = 'block';
                 progressArea.removeAttribute('aria-busy');
-                if (eventSource) eventSource.close();
+                if (eventSource) eventSource.close(); // Close definitively on unrecoverable error
             }
         };
 
