@@ -1,76 +1,128 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light"> <!-- Pico theme -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Research in Progress...</title>
+    <title>Research: {{ topic }}</title>
+    <link rel="stylesheet" href="{{ pico_css }}">
     <style>
-        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 900px; margin: auto; }
-        h1, h2, h3 { color: #333; }
-        pre { background-color: #f4f4f4; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; font-size: 0.9em; }
-        .report-container { border: 1px solid #ddd; padding: 20px; margin-top: 20px; border-radius: 5px; background-color: #f9f9f9; display: none; /* Hidden initially */ }
-        .error { color: red; border: 1px solid red; padding: 15px; background-color: #ffebeb; margin-top: 15px; }
-        #progress-updates { list-style: none; padding-left: 0; max-height: 300px; overflow-y: auto; border: 1px solid #eee; margin-bottom: 20px; padding: 10px; background: #fdfdfd; }
-        #progress-updates li { margin-bottom: 5px; font-size: 0.9em; }
-        #progress-updates li.error { color: red; font-weight: bold; }
-        #spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 15px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .biblio-section { margin-top: 30px; padding-top: 15px; border-top: 1px solid #ccc; }
-        .biblio-section h3 { margin-bottom: 10px; }
-        .biblio-section ul { list-style: none; padding-left: 0; }
-        .biblio-section li { margin-bottom: 8px; word-wrap: break-word; }
-         /* Style for annotations */
-        .report-content sup { font-size: 0.7em; vertical-align: super; padding: 0 2px; }
-        .report-content sup a { text-decoration: none; color: #007bff; }
-        .report-content sup a:hover { text-decoration: underline; }
+        body { padding-top: 1rem; padding-bottom: 3rem; }
+        main.container { max-width: 960px; } /* Wider container for results */
+        h1, h2, h3 { margin-bottom: 0.5rem; }
+        hr { margin: 2rem 0; }
+        #progress-log-container {
+            max-height: 250px;
+            overflow-y: auto;
+            background-color: var(--pico-card-background-color);
+            border: 1px solid var(--pico-card-border-color);
+            padding: 1rem;
+            border-radius: var(--pico-border-radius);
+            margin-bottom: 1.5rem;
+            font-size: 0.875em; /* Smaller font for logs */
+        }
+        #progress-log { list-style: none; padding-left: 0; margin: 0; }
+        #progress-log li { margin-bottom: 0.3rem; word-break: break-word; }
+        #progress-log li.error { color: var(--pico-form-invalid-color); font-weight: bold; }
+        .stream-container {
+            border: 1px dashed var(--pico-primary-focus);
+            padding: 1rem;
+            margin-top: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: var(--pico-border-radius);
+            background-color: var(--pico-contrast-hover);
+            display: none; /* Hidden initially */
+            white-space: pre-wrap; /* Preserve whitespace */
+            word-wrap: break-word;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .stream-container h4 { margin-top: 0; color: var(--pico-primary); }
+        #final-report-container { margin-top: 2rem; }
+        #final-report-content { background-color: #fff; padding: 1.5rem; border-radius: var(--pico-border-radius); border: 1px solid var(--pico-card-border-color); }
+        #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; }
+        #final-report-content h1:first-child, #final-report-content h2:first-child { margin-top: 0; }
+        #final-report-content sup a { text-decoration: none; } /* Footnote styling */
+        #final-report-content .footnotes ol { padding-left: 20px; }
+        #error-container { margin-top: 1.5rem; }
+        /* Pico overrides/additions if needed */
+        article[aria-busy="true"]::before { /* Improve spinner size/position */
+           width: 2rem;
+           height: 2rem;
+        }
     </style>
 </head>
 <body>
-    <h1>Research Progress</h1>
-    <p><strong>Topic:</strong> {{ topic }}</p>
-    <a href="/">Start New Research</a>
-    <hr>
+    <main class="container">
+        <hgroup>
+            <h1>Research Progress</h1>
+            <h2>Topic: {{ topic }}</h2>
+        </hgroup>
+        <a href="/" role="button" class="secondary outline">Start New Research</a>
+        <hr>
 
-    <div id="progress-container">
-        <h2>Live Progress:</h2>
-        <div id="spinner"></div>
-        <ul id="progress-updates">
-            <li>Initializing research process...</li>
-        </ul>
-    </div>
+        <!-- Progress Area -->
+        <article id="progress-area" aria-busy="true"> <!-- Show spinner while busy -->
+            <h3>Live Progress Log</h3>
+            <div id="progress-log-container">
+                <ul id="progress-log">
+                    <li>Initializing research process...</li>
+                </ul>
+            </div>
 
-    <div id="error-container" class="error" style="display: none;">
-        <h2>An Error Occurred</h2>
-        <p id="error-message"></p>
-    </div>
+            <!-- Streaming Output Area -->
+            <div id="synthesis-stream-container" class="stream-container">
+                <h4>Synthesizing Information (Live)...</h4>
+                <pre id="synthesis-stream-content"></pre>
+            </div>
+            <div id="report-stream-container" class="stream-container">
+                <h4>Generating Report (Live)...</h4>
+                <pre id="report-stream-content"></pre>
+            </div>
+        </article>
 
-    <div id="report-container" class="report-container">
-        <h2>Final Research Report</h2>
-        <div id="report-content" class="report-content">
-            <!-- Report HTML will be injected here -->
+        <!-- Error Display Area -->
+        <div id="error-container" style="display: none;">
+            <article>
+                <header><strong>An Error Occurred</strong></header>
+                <p id="error-message" style="color: var(--pico-form-invalid-color);"></p>
+            </article>
         </div>
-        <div id="bibliography" class="biblio-section">
-            <!-- Bibliography will be injected here -->
-        </div>
-         <details>
-             <summary>Raw Scraped Content Snippet (if available)</summary>
-             <pre id="scraped-preview">Not available.</pre>
-         </details>
-    </div>
 
-    <hr style="margin-top: 30px;">
-    <a href="/">Start New Research</a>
+        <!-- Final Report Area -->
+        <section id="final-report-container" style="display: none;">
+             <hr>
+            <h2>Final Research Report</h2>
+            <div id="final-report-content">
+                <!-- Report HTML will be injected here -->
+            </div>
+             <details style="margin-top: 2rem;">
+                 <summary>Raw Scraped Data Snippet (Debug)</summary>
+                 <pre id="scraped-preview" style="font-size: 0.8em; background: var(--pico-contrast);">Not available.</pre>
+             </details>
+        </section>
+
+        <hr style="margin-top: 30px;">
+        <a href="/" role="button" class="secondary outline">Start New Research</a>
+    </main>
 
     <script>
-        const progressList = document.getElementById('progress-updates');
-        const spinner = document.getElementById('spinner');
-        const reportContainer = document.getElementById('report-container');
-        const reportContent = document.getElementById('report-content');
-        const bibliographyContainer = document.getElementById('bibliography');
+        const progressLog = document.getElementById('progress-log');
+        const progressArea = document.getElementById('progress-area');
+        const finalReportContainer = document.getElementById('final-report-container');
+        const finalReportContent = document.getElementById('final-report-content');
         const errorContainer = document.getElementById('error-container');
         const errorMessage = document.getElementById('error-message');
         const scrapedPreview = document.getElementById('scraped-preview');
+
+        // Stream containers and content elements
+        const synthesisStreamContainer = document.getElementById('synthesis-stream-container');
+        const synthesisStreamContent = document.getElementById('synthesis-stream-content');
+        const reportStreamContainer = document.getElementById('report-stream-container');
+        const reportStreamContent = document.getElementById('report-stream-content');
+
         const topic = "{{ topic|e }}"; // Get topic safely from Flask
+
+        let currentStreamTarget = null; // To track where LLM chunks should go ('synthesis' or 'report')
 
         function addProgress(message, isError = false) {
             const li = document.createElement('li');
@@ -78,13 +130,27 @@
             if (isError) {
                 li.classList.add('error');
             }
-            // progressList.appendChild(li);
-            progressList.insertBefore(li, progressList.firstChild); // Add to top
-            progressList.scrollTop = 0; // Scroll to top
+            // progressLog.appendChild(li);
+            progressLog.insertBefore(li, progressLog.firstChild); // Add to top
+        }
+
+        function handleStreamChunk(content, target) {
+            let targetEl;
+            if (target === 'synthesis') {
+                targetEl = synthesisStreamContent;
+                synthesisStreamContainer.style.display = 'block';
+            } else if (target === 'report') {
+                targetEl = reportStreamContent;
+                reportStreamContainer.style.display = 'block';
+            } else {
+                return; // Unknown target
+            }
+            targetEl.textContent += content; // Append chunk
+            // Auto-scroll the stream container (optional)
+            // targetEl.parentElement.scrollTop = targetEl.parentElement.scrollHeight;
         }
 
         // Establish SSE connection
-        // Use URLSearchParams to pass the topic safely
         const params = new URLSearchParams({ topic: topic });
         const eventSource = new EventSource(`/stream?${params.toString()}`);
 
@@ -92,26 +158,42 @@
             try {
                 const data = JSON.parse(event.data);
 
-                if (data.type === 'progress') {
-                    addProgress(`[${new Date().toLocaleTimeString()}] ${data.message}`);
-                } else if (data.type === 'error') {
-                    addProgress(`ERROR: ${data.message}`, true);
-                    errorMessage.textContent = data.message;
-                    errorContainer.style.display = 'block';
-                    spinner.style.display = 'none'; // Hide spinner on error
-                    eventSource.close(); // Close connection on fatal error
-                } else if (data.type === 'complete') {
-                    addProgress("Research complete. Rendering report...");
-                    spinner.style.display = 'none'; // Hide spinner
-                    reportContent.innerHTML = data.report_html; // Assumes HTML is safe
-                    if (data.bibliography_html) {
-                        bibliographyContainer.innerHTML = data.bibliography_html;
-                    }
-                     if (data.raw_scraped_data_preview) {
-                         scrapedPreview.textContent = data.raw_scraped_data_preview;
-                     }
-                    reportContainer.style.display = 'block'; // Show report
-                    eventSource.close(); // Close connection
+                switch (data.type) {
+                    case 'progress':
+                        addProgress(`[${new Date().toLocaleTimeString()}] ${data.message}`);
+                        break;
+                    case 'error':
+                        addProgress(`ERROR: ${data.message}`, true);
+                        errorMessage.textContent = data.message;
+                        errorContainer.style.display = 'block';
+                        progressArea.removeAttribute('aria-busy'); // Stop spinner
+                        eventSource.close();
+                        break;
+                    case 'stream_start': // LLM stream starting
+                         currentStreamTarget = data.target; // e.g., 'synthesis' or 'report'
+                         addProgress(`AI starting to generate: ${currentStreamTarget}...`);
+                         // Show the correct container
+                         if (currentStreamTarget === 'synthesis') synthesisStreamContainer.style.display = 'block';
+                         if (currentStreamTarget === 'report') reportStreamContainer.style.display = 'block';
+                         break;
+                    case 'llm_chunk': // Chunk of LLM text arrived
+                         if (currentStreamTarget === data.target) {
+                            handleStreamChunk(data.content, data.target);
+                         }
+                         break;
+                    case 'complete':
+                        addProgress("Research process complete.");
+                        progressArea.removeAttribute('aria-busy'); // Stop spinner
+                        finalReportContent.innerHTML = data.report_html; // Render final formatted report
+                        if (data.raw_scraped_data_preview) {
+                           scrapedPreview.textContent = data.raw_scraped_data_preview;
+                        }
+                        finalReportContainer.style.display = 'block'; // Show report section
+                        // Optionally hide streaming containers now
+                        // synthesisStreamContainer.style.display = 'none';
+                        // reportStreamContainer.style.display = 'none';
+                        eventSource.close();
+                        break;
                 }
             } catch (e) {
                 console.error("Error parsing SSE data:", e);
@@ -121,14 +203,14 @@
 
         eventSource.onerror = function(err) {
             console.error("EventSource failed:", err);
-            addProgress("Connection to server lost or failed.", true);
-            errorMessage.textContent = "Lost connection to the server during research process. Please try again.";
+            const errorMsg = "Connection to server lost or failed during research. Please try again.";
+            addProgress(errorMsg, true);
+            errorMessage.textContent = errorMsg;
             errorContainer.style.display = 'block';
-            spinner.style.display = 'none';
-            eventSource.close();
+            progressArea.removeAttribute('aria-busy'); // Stop spinner
+            if (eventSource) eventSource.close();
         };
 
-        // Optional: Add a message if the connection closes unexpectedly before completion
         window.addEventListener('beforeunload', () => {
             if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
                 eventSource.close();

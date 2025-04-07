@@ -4,50 +4,57 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Deep Research Tool</title>
+    <link rel="stylesheet" href="{{ pico_css }}">
     <style>
-        body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: auto; }
-        textarea { width: 100%; min-height: 100px; margin-bottom: 10px; }
-        button { padding: 10px 15px; cursor: pointer; }
-        .loading { display: none; margin-top: 20px; }
-        .error { color: red; margin-top: 15px; }
+        body { padding-top: 2rem; padding-bottom: 2rem; }
+        main.container { max-width: 768px; } /* Limit width */
+        .error { color: var(--pico-form-invalid-color); }
+        textarea { min-height: 120px; }
+        form button[aria-busy="true"] { margin-left: 10px; }
     </style>
 </head>
 <body>
-    <h1>Deep Research Tool</h1>
-    <p>Enter your research topic below. The tool will use AI to create a plan, search the web, analyze results, and generate a report.</p>
-    <form id="research-form" action="/research" method="post">
-        <label for="topic">Research Topic:</label><br>
-        <textarea id="topic" name="topic" required></textarea><br>
-        <button type="submit">Start Research</button>
-    </form>
-    <div id="loading" class="loading">
-        <p><strong>Researching... This may take several minutes. Please wait.</strong></p>
-        <p>Status: <span id="status">Initializing...</span></p>
-        <!-- Add a simple spinner or progress indicator if desired -->
-    </div>
-    <div id="error-message" class="error"></div>
+    <main class="container">
+        <hgroup>
+            <h1>Deep Research Tool</h1>
+            <h2>Enter a topic to start AI-powered research</h2>
+        </hgroup>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="notice {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form id="research-form" action="/research" method="post">
+            <label for="topic">
+                Research Topic:
+                <textarea id="topic" name="topic" placeholder="e.g., history of the internet, impact of AI on healthcare" required></textarea>
+            </label>
+            <button type="submit" id="submit-button">Start Research</button>
+             <button type="submit" id="loading-button" class="secondary" aria-busy="true" style="display: none;">Researching...</button>
+        </form>
+    </main>
 
     <script>
-        // Basic loading indicator toggle
         const form = document.getElementById('research-form');
-        const loadingDiv = document.getElementById('loading');
-        const errorDiv = document.getElementById('error-message');
-        const statusSpan = document.getElementById('status');
+        const submitButton = document.getElementById('submit-button');
+        const loadingButton = document.getElementById('loading-button');
 
-        form.addEventListener('submit', () => {
-            loadingDiv.style.display = 'block';
-            errorDiv.textContent = ''; // Clear previous errors
-            statusSpan.textContent = 'Sending request...'; // Initial status
-            // You could potentially use fetch API and update status more dynamically
-            // For simplicity, this just shows "loading" until the page reloads with results.
-        });
-
-         // Function to update status (if using Fetch API later)
-         function updateStatus(message) {
-            if (statusSpan) {
-                statusSpan.textContent = message;
+        form.addEventListener('submit', (e) => {
+            // Basic validation check
+            const topic = document.getElementById('topic').value;
+            if (!topic.trim()) {
+                e.preventDefault(); // Stop submission
+                alert("Please enter a research topic.");
+                return;
             }
-        }
+            submitButton.style.display = 'none';
+            loadingButton.style.display = 'inline-block';
+            // Allow form submission to proceed
+        });
     </script>
 </body>
 </html>
