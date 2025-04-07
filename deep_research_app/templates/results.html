@@ -3,84 +3,138 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Research Results</title>
+    <title>Research in Progress...</title>
     <style>
         body { font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 900px; margin: auto; }
         h1, h2, h3 { color: #333; }
-        pre { background-color: #f4f4f4; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; }
-        .report { border: 1px solid #ddd; padding: 20px; margin-top: 20px; border-radius: 5px; background-color: #f9f9f9; }
-        .error { color: red; border: 1px solid red; padding: 15px; background-color: #ffebeb; }
-        details { margin-bottom: 15px; border: 1px solid #eee; border-radius: 4px; }
-        summary { font-weight: bold; padding: 10px; background-color: #f0f0f0; cursor: pointer; }
-        .details-content { padding: 15px; border-top: 1px solid #eee; background-color: #fff; }
-        .step-keywords { font-style: italic; color: #555; margin-bottom: 10px; }
-        .scraped-urls ul { list-style: disc; margin-left: 20px; }
-         .scraped-urls li { margin-bottom: 5px; }
+        pre { background-color: #f4f4f4; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; font-size: 0.9em; }
+        .report-container { border: 1px solid #ddd; padding: 20px; margin-top: 20px; border-radius: 5px; background-color: #f9f9f9; display: none; /* Hidden initially */ }
+        .error { color: red; border: 1px solid red; padding: 15px; background-color: #ffebeb; margin-top: 15px; }
+        #progress-updates { list-style: none; padding-left: 0; max-height: 300px; overflow-y: auto; border: 1px solid #eee; margin-bottom: 20px; padding: 10px; background: #fdfdfd; }
+        #progress-updates li { margin-bottom: 5px; font-size: 0.9em; }
+        #progress-updates li.error { color: red; font-weight: bold; }
+        #spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .biblio-section { margin-top: 30px; padding-top: 15px; border-top: 1px solid #ccc; }
+        .biblio-section h3 { margin-bottom: 10px; }
+        .biblio-section ul { list-style: none; padding-left: 0; }
+        .biblio-section li { margin-bottom: 8px; word-wrap: break-word; }
+         /* Style for annotations */
+        .report-content sup { font-size: 0.7em; vertical-align: super; padding: 0 2px; }
+        .report-content sup a { text-decoration: none; color: #007bff; }
+        .report-content sup a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
-    <h1>Research Results</h1>
+    <h1>Research Progress</h1>
+    <p><strong>Topic:</strong> {{ topic }}</p>
     <a href="/">Start New Research</a>
     <hr>
 
-    {% if error %}
-        <div class="error">
-            <h2>An Error Occurred</h2>
-            <p>{{ error }}</p>
-        </div>
-    {% else %}
-        <h2>Research Topic</h2>
-        <p>{{ topic }}</p>
+    <div id="progress-container">
+        <h2>Live Progress:</h2>
+        <div id="spinner"></div>
+        <ul id="progress-updates">
+            <li>Initializing research process...</li>
+        </ul>
+    </div>
 
-        <details>
-            <summary>Research Plan and Execution Details</summary>
-            <div class="details-content">
-                <h3>Generated Research Plan</h3>
-                 {% if plan_details %}
-                    <ol>
-                    {% for step in plan_details %}
-                        <li>
-                            <strong>{{ step.step_description }}</strong><br>
-                            <div class="step-keywords">Keywords: <em>{{ step.keywords | join(', ') }}</em></div>
-                            <div class="scraped-urls">
-                                Scraped URLs for this step:
-                                <ul>
-                                    {% for url in step.urls %}
-                                    <li><a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a></li>
-                                    {% else %}
-                                    <li>No URLs were successfully scraped for this step.</li>
-                                    {% endfor %}
-                                </ul>
-                            </div>
-                        </li>
-                    {% endfor %}
-                    </ol>
-                {% else %}
-                    <p>Could not retrieve research plan details.</p>
-                {% endif %}
-                <h3>Total Scraped Content Size</h3>
-                <p>{{ scraped_content_length }} characters (approx)</p>
-             </div>
-        </details>
+    <div id="error-container" class="error" style="display: none;">
+        <h2>An Error Occurred</h2>
+        <p id="error-message"></p>
+    </div>
 
-
+    <div id="report-container" class="report-container">
         <h2>Final Research Report</h2>
-        <div class="report">
-            {{ report_html | safe }}
+        <div id="report-content" class="report-content">
+            <!-- Report HTML will be injected here -->
         </div>
+        <div id="bibliography" class="biblio-section">
+            <!-- Bibliography will be injected here -->
+        </div>
+         <details>
+             <summary>Raw Scraped Content Snippet (if available)</summary>
+             <pre id="scraped-preview">Not available.</pre>
+         </details>
+    </div>
 
-        <details>
-             <summary>Raw Scraped Content (Truncated)</summary>
-             <div class="details-content">
-                <pre>{{ raw_scraped_data_preview }}</pre>
-                <em>(Showing first 5000 characters)</em>
-             </div>
-        </details>
-
-    {% endif %}
-
-    <hr>
+    <hr style="margin-top: 30px;">
     <a href="/">Start New Research</a>
 
+    <script>
+        const progressList = document.getElementById('progress-updates');
+        const spinner = document.getElementById('spinner');
+        const reportContainer = document.getElementById('report-container');
+        const reportContent = document.getElementById('report-content');
+        const bibliographyContainer = document.getElementById('bibliography');
+        const errorContainer = document.getElementById('error-container');
+        const errorMessage = document.getElementById('error-message');
+        const scrapedPreview = document.getElementById('scraped-preview');
+        const topic = "{{ topic|e }}"; // Get topic safely from Flask
+
+        function addProgress(message, isError = false) {
+            const li = document.createElement('li');
+            li.textContent = message;
+            if (isError) {
+                li.classList.add('error');
+            }
+            // progressList.appendChild(li);
+            progressList.insertBefore(li, progressList.firstChild); // Add to top
+            progressList.scrollTop = 0; // Scroll to top
+        }
+
+        // Establish SSE connection
+        // Use URLSearchParams to pass the topic safely
+        const params = new URLSearchParams({ topic: topic });
+        const eventSource = new EventSource(`/stream?${params.toString()}`);
+
+        eventSource.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'progress') {
+                    addProgress(`[${new Date().toLocaleTimeString()}] ${data.message}`);
+                } else if (data.type === 'error') {
+                    addProgress(`ERROR: ${data.message}`, true);
+                    errorMessage.textContent = data.message;
+                    errorContainer.style.display = 'block';
+                    spinner.style.display = 'none'; // Hide spinner on error
+                    eventSource.close(); // Close connection on fatal error
+                } else if (data.type === 'complete') {
+                    addProgress("Research complete. Rendering report...");
+                    spinner.style.display = 'none'; // Hide spinner
+                    reportContent.innerHTML = data.report_html; // Assumes HTML is safe
+                    if (data.bibliography_html) {
+                        bibliographyContainer.innerHTML = data.bibliography_html;
+                    }
+                     if (data.raw_scraped_data_preview) {
+                         scrapedPreview.textContent = data.raw_scraped_data_preview;
+                     }
+                    reportContainer.style.display = 'block'; // Show report
+                    eventSource.close(); // Close connection
+                }
+            } catch (e) {
+                console.error("Error parsing SSE data:", e);
+                addProgress("Error processing update from server.", true);
+            }
+        };
+
+        eventSource.onerror = function(err) {
+            console.error("EventSource failed:", err);
+            addProgress("Connection to server lost or failed.", true);
+            errorMessage.textContent = "Lost connection to the server during research process. Please try again.";
+            errorContainer.style.display = 'block';
+            spinner.style.display = 'none';
+            eventSource.close();
+        };
+
+        // Optional: Add a message if the connection closes unexpectedly before completion
+        window.addEventListener('beforeunload', () => {
+            if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+                eventSource.close();
+            }
+        });
+
+    </script>
 </body>
 </html>
