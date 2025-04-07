@@ -1,37 +1,69 @@
-#!python
+# --- START DEEP DEBUGGING ---
+import sys
 import os
+print("--- Python Interpreter Info ---")
+print(f"sys.executable: {sys.executable}")
+print(f"os.path.dirname(sys.executable): {os.path.dirname(sys.executable)}")
+print("\n--- sys.path ---")
+for i, p in enumerate(sys.path):
+    print(f"{i}: {p}")
+print("----------------------------\n")
+
+print("--- Attempting direct import of html2docx ---")
+_html2docx_direct_import_worked = False
+_html2docx_location = "Not found directly"
+try:
+    import html2docx
+    _html2docx_direct_import_worked = True
+    _html2docx_location = getattr(html2docx, '__file__', 'Location attribute missing')
+    print(f"SUCCESS: Direct import of html2docx worked.")
+    print(f"Location found: {_html2docx_location}")
+except ImportError as e:
+    print(f"FAILURE: Direct import failed. Error: {e}")
+except Exception as e:
+    print(f"FAILURE: Direct import failed with unexpected error: {type(e).__name__} - {e}")
+print("-------------------------------------------\n")
+# --- END DEEP DEBUGGING ---
+
+# --- MOVE THE TRY/EXCEPT BLOCK IMMEDIATELY BELOW DEEP DEBUG ---
+DOCX_CONVERSION_AVAILABLE = False
+print("--- Attempting standard import (from html2docx import Html2Docx) ---")
+try:
+    # Try the specific import needed later
+    from html2docx import Html2Docx
+    print("SUCCESS: 'from html2docx import Html2Docx' worked immediately after deep debug.")
+    DOCX_CONVERSION_AVAILABLE = True
+except ImportError as e:
+    print(f"FAILURE: 'from html2docx import Html2Docx' FAILED immediately after deep debug. Error: {e}")
+    # If direct import worked but this failed, print extra info
+    if _html2docx_direct_import_worked:
+        print(f"    NOTE: Direct 'import html2docx' had previously SUCCEEDED, finding it at: {_html2docx_location}")
+except Exception as e:
+     print(f"FAILURE: 'from html2docx import Html2Docx' failed with UNEXPECTED error immediately after deep debug: {type(e).__name__} - {e}")
+print("-----------------------------------------------------------------\n")
+
+# --- NOW THE REST OF THE IMPORTS ---
+#!python
+# import os # No need to re-import
 import re
 import time
 import json
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context, send_file
-# --- NEW: Import Google Generative AI ---
 import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold # For safety settings if needed later
-
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS
-# Use the Markdown library for better footnote support
 import markdown as md_lib
 from urllib.parse import quote, unquote
 import concurrent.futures
 from io import BytesIO
-# --- NEW: Import html2docx for DOCX conversion ---
-import traceback # Import traceback for detailed error logging
-
-DOCX_CONVERSION_AVAILABLE = False
-try:
-    from html2docx import Html2Docx
-    DOCX_CONVERSION_AVAILABLE = True
-    print("INFO: 'html2docx' library found. DOCX download will be enabled.")
-except ImportError:
-    print("WARNING: 'html2docx' library not found. DOCX download will be disabled.")
-    print("RECOMMENDATION: Install 'html2docx' (pip install html2docx)")
-    DOCX_CONVERSION_AVAILABLE = False
+import traceback
 
 # --- ADDED DEBUG PRINT HERE ---
-print(f"DEBUG: DOCX_CONVERSION_AVAILABLE set to: {DOCX_CONVERSION_AVAILABLE} at script start.")
+# This will now reflect the result of the import attempt done *earlier*
+print(f"DEBUG: DOCX_CONVERSION_AVAILABLE set to: {DOCX_CONVERSION_AVAILABLE} at script start (based on immediate check).")
 # -----------------------------
 
 
@@ -40,7 +72,7 @@ load_dotenv()
 # --- Google API Key and Model Name ---
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 # Use a valid Google model name (e.g., gemini-1.5-pro-latest, gemini-1.5-flash-latest)
-GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME", "gemini-1.5-flash-latest")
+GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME", "gemini-1.5-flash-latest") # Corrected model name
 
 # --- Search Configuration ---
 # Max results *per search engine* per research step
@@ -874,12 +906,16 @@ def stream():
                  raw_data_preview += f"\n... ({len(raw_data_preview_list)}/{len(scraped_sources_list)} sources shown)"
             elif not scraped_sources_list: raw_data_preview = "None (No sources scraped)"
 
+            # === DEBUG PRINT ADDED HERE ===
+            print(f"DEBUG [Stream End]: DOCX_CONVERSION_AVAILABLE is currently: {DOCX_CONVERSION_AVAILABLE}")
+            # ============================
+
             final_data = {
                 'type': 'complete',
                 'report_html': report_html,
                 'report_markdown': final_report_markdown,
                 'raw_scraped_data_preview': raw_data_preview,
-                'docx_available': DOCX_CONVERSION_AVAILABLE # Use the flag
+                'docx_available': DOCX_CONVERSION_AVAILABLE # Use the flag's value at this point
             }
             yield from send_event(final_data)
             end_time_total = time.time()
@@ -904,28 +940,38 @@ def stream():
 @app.route('/download_docx', methods=['POST'])
 def download_docx():
     """Converts the received Markdown report to DOCX via HTML and sends it."""
+    # Re-check availability just in case, though it should be consistent if set early
     if not DOCX_CONVERSION_AVAILABLE:
-        return jsonify({"success": False, "message": "DOCX download is disabled: 'html2docx' library not installed."}), 400
+        print("DEBUG [/download_docx]: Route called but DOCX_CONVERSION_AVAILABLE is False.")
+        return jsonify({"success": False, "message": "DOCX download is disabled: 'html2docx' library check failed at app start."}), 400
 
+    print("DEBUG [/download_docx]: Route called and DOCX_CONVERSION_AVAILABLE is True.")
     markdown_content = request.form.get('markdown_report')
     topic = request.form.get('topic', 'Research_Report')
 
     if not markdown_content:
+        print("ERROR [/download_docx]: No Markdown content received in POST request.")
         return jsonify({"success": False, "message": "Error: No Markdown content received."}), 400
 
     try:
+        print("DEBUG [/download_docx]: Converting Markdown to HTML...")
         # 1. Convert Markdown to HTML first
         report_html = md_lib.markdown(
             markdown_content,
             extensions=['footnotes', 'fenced_code', 'tables', 'nl2br', 'attr_list', 'md_in_html']
         )
+        print("DEBUG [/download_docx]: Markdown to HTML conversion done.")
 
         # 2. Convert HTML string to DOCX using html2docx
+        print("DEBUG [/download_docx]: Initializing Html2Docx parser...")
         parser = Html2Docx()
         buffer = BytesIO()
+        print("DEBUG [/download_docx]: Parsing HTML string...")
         parser.parse_html_string(report_html)
+        print("DEBUG [/download_docx]: Saving DOCX to buffer...")
         parser.docx.save(buffer) # Save the python-docx object to the buffer
         buffer.seek(0) # Rewind the buffer
+        print("DEBUG [/download_docx]: DOCX conversion complete, preparing to send file.")
 
         # 3. Send the buffer as a file download
         safe_filename_topic = re.sub(r'[^\w\s-]', '', topic).strip()
@@ -941,8 +987,7 @@ def download_docx():
         )
 
     except Exception as e:
-        print(f"Error converting Markdown to DOCX using html2docx:")
-        # --- MODIFIED: Print traceback for detailed error info ---
+        print(f"ERROR [/download_docx]: Error converting Markdown to DOCX using html2docx:")
         traceback.print_exc()
         msg = f"An error occurred during DOCX conversion: {e}"
         return jsonify({"success": False, "message": msg}), 500
@@ -954,5 +999,6 @@ if __name__ == '__main__':
     # pip install Flask python-dotenv google-generativeai duckduckgo-search beautifulsoup4 requests lxml Markdown html2docx flask[async]
     # Set GOOGLE_API_KEY in your .env file
     print(f"Using Google Model: {GOOGLE_MODEL_NAME}")
+    # This print now uses the value determined by the immediate import check
     print(f"DOCX conversion available (html2docx): {DOCX_CONVERSION_AVAILABLE}")
-    app.run(debug=True, host='0.0.0.0', port=5001, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=5001, threaded=True) # Consider threaded=False for simpler debugging if needed

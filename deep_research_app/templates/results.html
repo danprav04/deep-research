@@ -300,7 +300,12 @@
                         // --- ADDED CONSOLE LOGS HERE ---
                         console.log("Received 'complete' event data:", data);
                         console.log("Checking data.docx_available:", data.docx_available);
-                        // -----------------------------
+
+                        // --- More explicit check ---
+                        const isDocxTrulyAvailable = data.docx_available === true;
+                        console.log("Result of strict check (isDocxTrulyAvailable):", isDocxTrulyAvailable);
+                        // -------------------------
+
 
                         addProgress("Research process complete.");
                         progressArea.removeAttribute('aria-busy');
@@ -309,20 +314,22 @@
                         // Handle download section
                         if (data.report_markdown) {
                             rawMarkdownReport.value = data.report_markdown; // Store raw markdown
-                            if (data.docx_available) {
-                                downloadForm.style.display = 'block'; // Show download form
+                            // --- Use the stricter variable ---
+                            if (isDocxTrulyAvailable) {
+                                console.log("JS Logic: DOCX determined AVAILABLE."); // Add log
+                                downloadForm.style.display = 'block';
                                 downloadDocxButton.disabled = false;
                                 docxUnavailableMsg.style.display = 'none';
                             } else {
-                                // html2docx not available on server
-                                downloadForm.style.display = 'block'; // Still show section
-                                downloadDocxButton.disabled = true; // Disable button
-                                // --- MODIFIED: Ensure correct message is displayed ---
-                                docxUnavailableMsg.style.display = 'inline'; // Show warning
+                                console.log("JS Logic: DOCX determined UNAVAILABLE."); // Add log
+                                downloadForm.style.display = 'block';
+                                downloadDocxButton.disabled = true;
+                                docxUnavailableMsg.style.display = 'inline';
                             }
                         } else {
+                             console.log("JS Logic: No markdown, hiding download form."); // Add log
                             addProgress("No final report markdown received.", true);
-                            downloadForm.style.display = 'none'; // Hide form if no markdown
+                            downloadForm.style.display = 'none';
                         }
 
                         if (data.raw_scraped_data_preview) {
