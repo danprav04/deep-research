@@ -12,16 +12,18 @@ from duckduckgo_search import DDGS
 # Use the Markdown library for better footnote support
 import markdown as md_lib
 from urllib.parse import quote
+import concurrent.futures # Import the concurrent futures library
 
 # --- Configuration ---
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL_NAME = os.getenv("OPENROUTER_MODEL_NAME", "google/gemini-pro-1.5")
+OPENROUTER_MODEL_NAME = os.getenv("OPENROUTER_MODEL_NAME", "google/gemini-pro-1.5") # Consider models with larger context if needed for many steps
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
-MAX_SEARCH_RESULTS_PER_STEP = 5
-MAX_TOTAL_URLS_TO_SCRAPE = 20
-REQUEST_TIMEOUT = 10
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+MAX_SEARCH_RESULTS_PER_STEP = 10 # Reduced slightly to manage total URLs better with more steps
+MAX_TOTAL_URLS_TO_SCRAPE = 100  # Increased slightly, balance with performance
+MAX_WORKERS = 10 # Can potentially increase slightly
+REQUEST_TIMEOUT = 12 # Slightly increased timeout
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36" # Updated UA string
 PICO_CSS_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"
 
 # --- Initialize Flask App ---
@@ -35,7 +37,7 @@ client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_API_BASE)
 
 # --- Helper Functions ---
 
-# call_gemini (Robust version from previous iteration)
+# call_gemini - No changes needed
 def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
     """Calls the specified Gemini model via OpenRouter with retry logic."""
     messages = []
@@ -49,6 +51,7 @@ def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
                 model=OPENROUTER_MODEL_NAME,
                 messages=messages,
                 temperature=0.6,
+                # Consider adding max_tokens if context becomes an issue
             )
 
             if completion is None: raise ValueError("API response object is None.")
@@ -59,6 +62,9 @@ def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
             if not completion.choices[0].message: raise ValueError("API response choice missing 'message' attribute.")
             if completion.choices[0].message.content is None:
                  finish_reason = getattr(completion.choices[0], 'finish_reason', 'Unknown')
+                 # Check for length finish reason, could indicate context overflow
+                 if finish_reason == 'length':
+                     raise ValueError(f"API response message content is None (finish reason: {finish_reason}). Prompt might be too long.")
                  raise ValueError(f"API response message content is None (finish reason: {finish_reason}).")
 
             response_content = completion.choices[0].message.content.strip()
@@ -73,7 +79,7 @@ def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
                 print("Max retries reached. Failing LLM call.")
                 raise
 
-# stream_gemini (From previous iteration)
+# stream_gemini - No changes needed
 def stream_gemini(prompt, system_prompt=None):
     """
     Calls the Gemini model with streaming enabled and yields content chunks.
@@ -89,22 +95,36 @@ def stream_gemini(prompt, system_prompt=None):
             messages=messages,
             temperature=0.6,
             stream=True,
+            # Consider adding max_tokens if context becomes an issue
         )
+        complete_response = "" # Added to check finish reason
+        finish_reason = None
         for chunk in stream:
             delta_content = chunk.choices[0].delta.content if chunk.choices and chunk.choices[0].delta else None
             if delta_content:
+                complete_response += delta_content
                 yield {'type': 'chunk', 'content': delta_content} # Yield chunk data
+            if chunk.choices and chunk.choices[0].finish_reason:
+                 finish_reason = chunk.choices[0].finish_reason
 
-        yield {'type': 'stream_end'}
+
+        # After loop, check finish reason (especially for length limit)
+        if finish_reason == 'length':
+             print(f"Warning: LLM stream finished due to length. Response might be truncated. Prompt length: ~{len(prompt)}")
+             # Optionally yield an error/warning event here
+             yield {'type': 'stream_warning', 'message': f'LLM stream may have been truncated due to length limits (finish reason: {finish_reason}).'}
+
+        yield {'type': 'stream_end', 'finish_reason': finish_reason} # Include finish reason
 
     except Exception as e:
         print(f"Error during LLM stream: {e}")
+        # Yield a specific error type that the main generator can catch
         yield {'type': 'stream_error', 'message': str(e)}
-        raise
+        # Don't raise here, let the main generator handle termination
 
-# parse_research_plan (Robust version from previous iteration)
+# parse_research_plan - No changes needed
 def parse_research_plan(llm_response):
-    # --- Include the full robust parse_research_plan function here ---
+    # --- (Keep the robust parser from previous step) ---
     plan = []
     if not llm_response:
         print("Error: Received empty response from LLM for plan generation.")
@@ -134,10 +154,12 @@ def parse_research_plan(llm_response):
                     for item in data:
                         keywords_list = item.get('keywords', [])
                         if isinstance(keywords_list, str):
-                            keywords_list = [k.strip() for k in keywords_list.split(',') if k.strip()]
+                            # Handle keywords separated by comma or newline
+                            keywords_list = [k.strip() for k in re.split(r'[,\n]', keywords_list) if k.strip()]
                         elif not isinstance(keywords_list, list):
                             print(f"Warning: Keywords for step '{item.get('step')}' was not a list or string, setting to empty.")
                             keywords_list = []
+                        # Filter out empty strings again just in case
                         valid_keywords = [str(k).strip() for k in keywords_list if str(k).strip()]
                         step_desc = str(item.get('step', 'N/A')).strip()
                         if step_desc and step_desc != 'N/A':
@@ -158,7 +180,7 @@ def parse_research_plan(llm_response):
 
     print("Attempting Markdown/text parsing as fallback...")
     pattern_regex = re.compile(
-        r"^\s*(?:\d+\.?|-)\s*(.*?)"
+        r"^\s*(?:\d+\.?\s*[:-]?|-)\s*(.*?)" # More flexible separator after number
         r"(?:\s*[\(\[]\s*Keywords?\s*[:\-]?\s*(.*?)\s*[\)\]]\s*)?$",
         re.MULTILINE | re.IGNORECASE
     )
@@ -168,10 +190,12 @@ def parse_research_plan(llm_response):
         plan = []
         for desc, keys_str in matches:
             desc = desc.strip()
-            desc = re.sub(r'\s*Keywords?\s*:.*$', '', desc, flags=re.IGNORECASE).strip()
+            # More robust keyword removal from description if not captured separately
+            desc = re.sub(r'\s*\(?Keywords?[:\-]?.*?\)?$', '', desc, flags=re.IGNORECASE).strip()
             keys = []
             if keys_str:
-                keys = [k.strip() for k in keys_str.split(',') if k.strip()]
+                 # Handle comma or newline separated keywords here too
+                 keys = [k.strip() for k in re.split(r'[,\n]', keys_str) if k.strip()]
             if desc:
                  plan.append({"step_description": desc, "keywords": keys})
         if plan:
@@ -179,6 +203,7 @@ def parse_research_plan(llm_response):
             return plan
         else:
             print("Regex matched structure but failed to extract valid steps/keywords.")
+
 
     print("Regex parsing failed or yielded no results. Trying simple line parsing.")
     lines = raw_response.strip().split('\n')
@@ -188,10 +213,11 @@ def parse_research_plan(llm_response):
     for line in lines:
         line = line.strip()
         if not line: continue
-        step_match = re.match(r"^\s*(?:step\s+)?(\d+)\s*[:.\-]?\s*(.*)", line, re.IGNORECASE)
+        # Try matching lines starting with a number/dash/bullet followed by text
+        step_match = re.match(r"^\s*(?:step\s+)?(\d+)\s*[:.\-]?\s*(.*)|^\s*[-*+]\s+(.*)", line, re.IGNORECASE)
         if step_match:
-            step_num_str, step_text = step_match.groups()
-            step_desc = step_text.strip()
+            # Extract description based on which group matched
+            step_desc = (step_match.group(2) or step_match.group(3) or "").strip()
             keys = []
             for marker in keyword_markers:
                 marker_lower = marker.lower()
@@ -199,89 +225,157 @@ def parse_research_plan(llm_response):
                     parts = re.split(marker, step_desc, maxsplit=1, flags=re.IGNORECASE)
                     if len(parts) == 2:
                         step_desc = parts[0].strip()
-                        keys = [k.strip() for k in parts[1].split(',') if k.strip()]
-                        break
+                        # Handle comma/newline separators for keys
+                        keys = [k.strip() for k in re.split(r'[,\n]', parts[1]) if k.strip()]
+                        break # Stop after first keyword marker found
             if step_desc:
                 current_step = {"step_description": step_desc, "keywords": keys}
                 plan.append(current_step)
             else:
-                current_step = None
+                current_step = None # Reset if description becomes empty
         elif current_step and not current_step["keywords"]:
+             # Check if the line *only* contains keywords
+             is_keyword_line = False
              for marker in keyword_markers:
                  marker_lower = marker.lower()
                  if line.lower().startswith(marker_lower):
                      keys_str = line[len(marker):].strip()
-                     current_step["keywords"] = [k.strip() for k in keys_str.split(',') if k.strip()]
+                     # Handle comma/newline separators for keys
+                     current_step["keywords"] = [k.strip() for k in re.split(r'[,\n]', keys_str) if k.strip()]
+                     is_keyword_line = True
                      break
+             # If it wasn't *just* a keyword line, maybe it's part of the description?
+             # This part is tricky, avoid appending random lines. Let's stick to explicit steps.
+             # if not is_keyword_line and current_step:
+             #    current_step["step_description"] += "\n" + line # Might append unrelated lines
+
     if plan:
-        plan = [p for p in plan if p.get("step_description")]
+        plan = [p for p in plan if p.get("step_description")] # Final cleanup
         if plan:
              print("Parsed research plan using simple line-based approach.")
              return plan
 
     print("All parsing methods failed to extract a valid research plan.")
     return [{"step_description": "Failed to parse plan structure from LLM response", "keywords": []}]
-    # --- End of robust parser ---
 
-# search_duckduckgo (Same as before)
+# search_duckduckgo - No changes needed
 def search_duckduckgo(keywords, max_results=MAX_SEARCH_RESULTS_PER_STEP):
     """Performs a search on DuckDuckGo using the library."""
     query = " ".join(keywords)
     urls = []
+    if not query: return [] # Handle empty keywords
+    print(f"  -> DDGS Searching for: '{query}' (max_results={max_results})")
     try:
+        # Ensure DDGS is instantiated correctly within the function scope
+        # Use context manager for proper resource management
         with DDGS(timeout=15) as ddgs:
+            # Use list() to force iteration and catch potential errors within the context manager
             results = list(ddgs.text(query, max_results=max_results))
-            urls = [r['href'] for r in results if 'href' in r]
+            urls = [r['href'] for r in results if r and 'href' in r]
+            print(f"  -> DDGS Found {len(urls)} URLs for '{query}'")
     except Exception as e:
         print(f"Error searching DuckDuckGo for '{query}': {e}")
+        # Optionally retry or just return empty list
     return urls
 
-# scrape_url (Same as before, returning dict)
+
+# scrape_url - Minor logging improvements
 def scrape_url(url):
     """
     Scrapes text content from a given URL.
     Returns a dictionary {'url': url, 'content': text} on success, None on failure.
     """
+    # Shorten URL for logging
+    log_url = url[:75] + '...' if len(url) > 75 else url
     try:
         headers = {'User-Agent': USER_AGENT}
-        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-        response.raise_for_status()
+        response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True, stream=True) # Use stream=True initially
+        response.raise_for_status() # Check for 4xx/5xx errors
+
         content_type = response.headers.get('content-type', '').lower()
-        if 'html' not in content_type: return None
+        if 'html' not in content_type:
+            print(f"Skipping non-HTML content: {log_url} (Type: {content_type})")
+            response.close() # Ensure connection is closed
+            return None
+
         content_length = response.headers.get('content-length')
-        if content_length and int(content_length) > 10 * 1024 * 1024: return None
+        # Check content length *before* reading the whole thing if possible
+        if content_length and int(content_length) > 10 * 1024 * 1024: # 10MB limit
+            print(f"Skipping large file (>10MB): {log_url}")
+            response.close()
+            return None
 
-        try: soup = BeautifulSoup(response.content, 'lxml')
-        except Exception: soup = BeautifulSoup(response.content, 'html.parser')
+        # Read content now, respecting potential size limit again if needed
+        # This part might need refinement if very large pages cause memory issues even after the header check
+        html_content = response.content # Reads the entire content
 
-        for element in soup(["script", "style", "nav", "footer", "aside", "header", "form", "button", "input", "textarea", "select"]):
+        response.close() # Close the connection after reading
+
+        try:
+            soup = BeautifulSoup(html_content, 'lxml') # Try lxml first
+        except Exception:
+            soup = BeautifulSoup(html_content, 'html.parser') # Fallback to html.parser
+
+        # Remove unwanted tags more aggressively
+        for element in soup(["script", "style", "nav", "footer", "aside", "header", "form", "button", "input", "textarea", "select", "img", "figure", "iframe", "video", "audio", "picture", "source", "noscript", "meta", "link"]):
             element.decompose()
 
-        main_content = soup.find('main') or soup.find('article') or \
+        # Try finding common main content containers
+        main_content = soup.find('main') or \
+                       soup.find('article') or \
                        soup.find('div', attrs={'role': 'main'}) or \
-                       soup.find('div', id='content') or soup.find('div', class_='content') or \
-                       soup.find('div', id='main') or soup.find('div', class_='main')
+                       soup.find('div', id='content') or \
+                       soup.find('div', class_=re.compile(r'\b(content|main|post|entry)\b', re.I)) or \
+                       soup.find('div', id=re.compile(r'\b(content|main)\b', re.I))
 
-        if main_content: text = main_content.get_text(separator='\n', strip=True)
+        if main_content:
+             text = main_content.get_text(separator='\n', strip=True)
         else:
+            # Fallback to body if no specific main content found
              body = soup.find('body')
-             if body: text = body.get_text(separator='\n', strip=True)
-             else: text = soup.get_text(separator='\n', strip=True)
+             if body:
+                 text = body.get_text(separator='\n', strip=True)
+             else:
+                 # Absolute fallback if even body tag is missing (unlikely for valid HTML)
+                 text = soup.get_text(separator='\n', strip=True)
 
+        # Cleaning the extracted text
         lines = (line.strip() for line in text.splitlines())
+        # Break multi-sentence lines into potential paragraphs, then strip whitespace
         chunks = (' '.join(phrase.split()) for line in lines for phrase in line.split("  ") if phrase.strip())
-        cleaned_text = '\n'.join(chunk for chunk in chunks if chunk and len(chunk.split()) > 1)
-        meaningful_word_count = len([word for word in cleaned_text.split() if len(word) > 3])
-        if meaningful_word_count < 50: return None
+        # Rejoin, keeping meaningful lines (more than just a couple of short words)
+        cleaned_text = '\n'.join(chunk for chunk in chunks if chunk and len(chunk.split()) > 3) # Increased min words per line
 
+        # Final check for meaningful content length
+        meaningful_word_count = len([word for word in cleaned_text.split() if len(word) > 2]) # Count words > 2 chars
+        if meaningful_word_count < 75: # Increased threshold
+             print(f"Skipping due to low meaningful content ({meaningful_word_count} words): {log_url}")
+             return None
+
+        # print(f"Successfully scraped: {log_url} ({len(cleaned_text)} chars)")
         return {'url': url, 'content': cleaned_text}
 
-    except requests.exceptions.Timeout: print(f"Timeout error fetching URL {url}")
-    except requests.exceptions.RequestException as e: print(f"Error fetching URL {url}: {e}")
-    except Exception as e: print(f"Error parsing or processing URL {url}: {e}")
+    except requests.exceptions.Timeout:
+        print(f"Timeout error fetching URL {log_url}")
+    except requests.exceptions.RequestException as e:
+        # More specific error logging for HTTP errors
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"HTTP Error {e.response.status_code} fetching URL {log_url}: {e}")
+        else:
+            print(f"Request Error fetching URL {log_url}: {e}")
+    except Exception as e:
+        print(f"Error parsing or processing URL {log_url}: {e}")
+        # import traceback
+        # traceback.print_exc() # Uncomment for detailed debugging if needed
+    finally:
+        # Ensure response is closed in case of exceptions before reading content
+        if 'response' in locals() and response and not response.raw.closed:
+            response.close()
+
     return None
 
-# generate_bibliography_map (Same as before)
+
+# generate_bibliography_map - No changes needed
 def generate_bibliography_map(scraped_sources_list):
     """Creates a map of {url: index} and a numbered list for prompts."""
     url_to_index = {data['url']: i + 1 for i, data in enumerate(scraped_sources_list)}
@@ -301,105 +395,197 @@ def research_start():
     topic = request.form.get('topic')
     if not topic:
         return redirect(url_for('index'))
-    return render_template('results.html', topic=topic, pico_css=PICO_CSS_CDN)
-
+    # URL-encode the topic for safe inclusion in the results page URL
+    encoded_topic = quote(topic)
+    return render_template('results.html', topic=topic, encoded_topic=encoded_topic, pico_css=PICO_CSS_CDN)
 
 @app.route('/stream')
 def stream():
     """The main SSE route that performs research and streams progress."""
+    # Topic needs to be retrieved from query parameters now
     topic = request.args.get('topic', 'Default Topic')
+    if not topic:
+        topic = "Default Topic" # Fallback if somehow empty
 
     # SSE Generator function
     def generate_updates():
         scraped_sources_list = []
-        all_scraped_urls_set = set()
-        plan_details_for_template = []
+        all_found_urls_set = set() # Track all URLs found during search
+        urls_to_scrape_list = [] # List of unique URLs to actually scrape
         research_plan = []
         accumulated_synthesis = ""
         accumulated_report = ""
+        start_time_total = time.time() # Track total time
 
         def send_event(data):
             """Helper to format and yield SSE events."""
-            yield f"data: {json.dumps(data)}\n\n"
+            # Ensure data is serializable before sending
+            try:
+                payload = json.dumps(data)
+                yield f"data: {payload}\n\n"
+            except TypeError as e:
+                print(f"Error serializing data for SSE: {e}. Data: {data}")
+                # Send an error event instead or skip
+                error_payload = json.dumps({'type': 'error', 'message': f"Internal server error: Could not serialize data - {e}"})
+                yield f"data: {error_payload}\n\n"
+
 
         def send_progress(message):
             yield from send_event({'type': 'progress', 'message': message})
 
-        def send_error(message, fatal=False):
+        # **MODIFIED**: send_error no longer raises StopIteration
+        def send_error_event(message):
+            """Sends an error event via SSE."""
             print(f"ERROR: {message}")
             yield from send_event({'type': 'error', 'message': message})
-            if fatal: raise StopIteration("Fatal error occurred")
 
         try:
             # === Step 1: Generate Research Plan ===
             yield from send_progress(f"Generating research plan for: '{topic}'...")
-            # *** FIXED F-STRING HERE ***
+            # ***MODIFIED*** Ask for more steps
             plan_prompt = f"""
-            Create a concise, 3-4 step research plan for: "{topic}"
-            Format STRICTLY as a JSON list of objects with 'step' and 'keywords' keys.
-            Example: [{{"step": "Origin", "keywords": ["kw1", "kw2"]}}]. NO extra text.
-            Ensure the output is ONLY the valid JSON list. Use relevant steps/keywords for "{topic}". Keep the plan to 3-4 steps.
+            Create a detailed, step-by-step research plan with 10-15 distinct steps for the topic: "{topic}"
+            Each step should represent a specific question or area of inquiry related to the topic.
+            Format the output STRICTLY as a JSON list of objects. Each object must have two keys:
+            1. "step": A string describing the research step/question.
+            2. "keywords": A list of 2-4 relevant keyword strings for searching about this step.
+
+            Example format:
+            [
+              {{"step": "Define the core concept", "keywords": ["term definition", "term explanation"]}},
+              {{"step": "Explore historical origins", "keywords": ["history of term", "term origins"]}},
+              ... (10-15 steps total)
+            ]
+
+            Ensure the output is ONLY the valid JSON list and nothing else. No introductory text, no explanations, just the JSON.
+            Generate 10 to 15 relevant steps for the specific topic: "{topic}".
             """
-            plan_response = call_gemini(plan_prompt)
+            try:
+                plan_response = call_gemini(plan_prompt)
+            except Exception as e:
+                 yield from send_error_event(f"Failed to generate research plan from LLM: {e}")
+                 return # Terminate generator
+
             research_plan = parse_research_plan(plan_response)
 
-            if not research_plan or (len(research_plan) == 1 and research_plan[0]["step_description"].startswith("Failed")):
-                 fail_reason = research_plan[0]["step_description"] if research_plan else "Unknown"
-                 raw_snippet = f" Raw: {plan_response[:100]}..." if plan_response else ""
-                 yield from send_error(f"Failed plan: {fail_reason}.{raw_snippet}", fatal=True)
-                 return
+            # More robust check for failed plan parsing
+            if not research_plan or not isinstance(research_plan, list) or \
+               (len(research_plan) == 1 and research_plan[0]["step_description"].startswith("Failed")):
+                 fail_reason = research_plan[0]["step_description"] if (research_plan and isinstance(research_plan, list) and research_plan[0].get("step_description")) else "Could not parse plan from LLM response."
+                 raw_snippet = f" Raw Response Snippet: '{plan_response[:150]}...'" if plan_response else ""
+                 yield from send_error_event(f"Failed to create or parse a valid research plan. {fail_reason}{raw_snippet}")
+                 return # Terminate generator
 
             yield from send_progress(f"Generated {len(research_plan)} step plan:")
-            for i, step in enumerate(research_plan):
-                 yield from send_progress(f"  {i+1}. {step['step_description']}")
+            # Log only first few steps if plan is very long
+            log_limit = 5
+            for i, step in enumerate(research_plan[:log_limit]):
+                 yield from send_progress(f"  {i+1}. {step['step_description']} (Keywords: {', '.join(step.get('keywords',[]))[:50]}...)")
+            if len(research_plan) > log_limit:
+                 yield from send_progress(f"  ... and {len(research_plan) - log_limit} more steps.")
 
-            # === Step 2: Search and Scrape ===
-            yield from send_progress("Starting web search & scraping...")
-            total_scraped_successfully = 0
+
+            # === Step 2a: Search and Collect URLs ===
+            yield from send_progress("Starting web search to collect URLs...")
+            start_search_time = time.time()
+            urls_collected_count = 0
+            search_tasks = []
+
+            # Create search tasks for all steps concurrently (optional, DDGS library might handle internally)
+            # This might not speed up significantly if DDGS library itself is blocking per search
+            # Let's stick to sequential search per step for simplicity and better logging
+            all_urls_from_search = [] # Keep track of all URLs found across steps
             for i, step in enumerate(research_plan):
                 step_desc = step.get('step_description', f'Unnamed Step {i+1}')
                 keywords = step.get('keywords', [])
-                step_scraped_urls_list = []
-                yield from send_progress(f"Step {i+1}: '{step_desc}'")
+
+                yield from send_progress(f"Searching - Step {i+1}/{len(research_plan)}: '{step_desc}'")
                 if not keywords:
-                    yield from send_progress("  -> No keywords, skipping search.")
-                    plan_details_for_template.append({**step, "urls": [], "keywords": keywords})
+                    yield from send_progress("  -> No keywords provided, skipping search for this step.")
                     continue
 
-                yield from send_progress(f"  -> Searching: {', '.join(keywords)}")
-                step_urls = search_duckduckgo(keywords, MAX_SEARCH_RESULTS_PER_STEP)
-                yield from send_progress(f"  -> Found {len(step_urls)} URLs.")
+                # Perform the search for this step
+                step_search_results = search_duckduckgo(keywords, MAX_SEARCH_RESULTS_PER_STEP)
+                all_urls_from_search.extend(step_search_results) # Add all found URLs
+                time.sleep(0.1) # Small delay between searches
 
-                urls_to_scrape_this_step = 0
-                for url in step_urls:
-                    if total_scraped_successfully >= MAX_TOTAL_URLS_TO_SCRAPE:
-                        yield from send_progress("  -> Max scrape limit reached.")
-                        break
-                    if url in all_scraped_urls_set: continue
-                    if url.lower().endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx')):
-                         all_scraped_urls_set.add(url)
-                         continue
-                    if urls_to_scrape_this_step >= MAX_SEARCH_RESULTS_PER_STEP:
-                        yield from send_progress(f"  -> Step scrape limit reached.")
-                        break
 
-                    all_scraped_urls_set.add(url)
-                    urls_to_scrape_this_step += 1
-                    yield from send_progress(f"  -> Scraping ({urls_to_scrape_this_step}/{MAX_SEARCH_RESULTS_PER_STEP}): {url[:70]}...")
-                    scraped_data = scrape_url(url)
+            yield from send_progress(f"Search phase completed in {time.time() - start_search_time:.2f}s. Found {len(all_urls_from_search)} total URLs initially.")
 
-                    if scraped_data and isinstance(scraped_data, dict) and scraped_data.get('content'):
-                         scraped_sources_list.append(scraped_data)
-                         step_scraped_urls_list.append(url)
-                         total_scraped_successfully += 1
-                         yield from send_progress(f"    -> OK ({len(scraped_data['content'])} chars). Total: {total_scraped_successfully}")
-                plan_details_for_template.append({**step, "urls": step_scraped_urls_list, "keywords": keywords})
-                time.sleep(0.2)
+            # De-duplicate and filter URLs *after* collecting all search results
+            unique_urls = list(dict.fromkeys(all_urls_from_search)) # Preserve order while de-duplicating
+            yield from send_progress(f"Processing {len(unique_urls)} unique URLs...")
+
+            for url in unique_urls:
+                 if not url: continue
+                 if urls_collected_count >= MAX_TOTAL_URLS_TO_SCRAPE:
+                      yield from send_progress(f"  -> Reached URL collection limit ({MAX_TOTAL_URLS_TO_SCRAPE}).")
+                      break
+                 if url in all_found_urls_set: continue # Should be redundant due to unique_urls, but safe
+
+                 # Basic filtering before adding to the scrape list
+                 is_file = url.lower().split('?')[0].split('#')[0].endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx', '.webp', '.svg', '.xml', '.css', '.js'))
+                 is_mailto = url.lower().startswith('mailto:')
+                 is_javascript = url.lower().startswith('javascript:')
+                 is_ftp = url.lower().startswith('ftp:')
+                 is_valid_http = url.startswith(('http://', 'https://'))
+
+                 if not is_file and not is_mailto and not is_javascript and not is_ftp and is_valid_http:
+                      urls_to_scrape_list.append(url)
+                      all_found_urls_set.add(url) # Add to set to track uniqueness for scraping
+                      urls_collected_count += 1
+                      # yield from send_progress(f"    -> Added to scrape queue ({urls_collected_count}/{MAX_TOTAL_URLS_TO_SCRAPE}): {url[:70]}...") # Too verbose
+                 # else: # Don't log every skipped URL unless debugging
+                 #      # yield from send_progress(f"    -> Skipping (file/invalid/duplicate): {url[:70]}...")
+                 #      all_found_urls_set.add(url) # Add even non-scrapeable ones to avoid re-checking later if needed
+
+            yield from send_progress(f"Selected {len(urls_to_scrape_list)} valid, unique URLs for scraping (limit: {MAX_TOTAL_URLS_TO_SCRAPE}).")
+
+            if not urls_to_scrape_list:
+                 yield from send_error_event("No suitable URLs found to scrape after searching and filtering.")
+                 return # Terminate generator
+
+            # === Step 2b: Scrape URLs Concurrently ===
+            yield from send_progress(f"Starting concurrent scraping of {len(urls_to_scrape_list)} URLs using up to {MAX_WORKERS} workers...")
+            start_scrape_time = time.time()
+            total_scraped_successfully = 0
+            processed_scrape_count = 0
+
+            # Use ThreadPoolExecutor to scrape concurrently
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                future_to_url = {executor.submit(scrape_url, url): url for url in urls_to_scrape_list}
+
+                for future in concurrent.futures.as_completed(future_to_url):
+                    url = future_to_url[future]
+                    processed_scrape_count += 1
+                    try:
+                        result_dict = future.result() # result() can raise exceptions from the thread
+                        if result_dict and isinstance(result_dict, dict) and result_dict.get('content'):
+                            scraped_sources_list.append(result_dict)
+                            total_scraped_successfully += 1
+                            # yield from send_progress(f"  Scraped {processed_scrape_count}/{len(urls_to_scrape_list)}: OK - {url[:60]}...") # Too verbose
+                        # else: Failure logged within scrape_url
+                            # yield from send_progress(f"  Scraped {processed_scrape_count}/{len(urls_to_scrape_list)}: Failed/Skipped - {url[:60]}...") # Too verbose
+                    except Exception as exc:
+                        yield from send_progress(f"    -> Thread Error scraping {url[:60]}...: {exc}") # Log exceptions raised by future.result()
+                    finally:
+                         # Send progress less frequently to avoid overwhelming the UI
+                         if processed_scrape_count % 5 == 0 or processed_scrape_count == len(urls_to_scrape_list):
+                              progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_list)
+                              yield from send_progress(f"  -> Scraping progress: {processed_scrape_count}/{len(urls_to_scrape_list)} ({progress_perc}% complete). Success: {total_scraped_successfully}")
+
+
+            duration = time.time() - start_scrape_time
+            yield from send_progress(f"Finished scraping. Successfully scraped {total_scraped_successfully}/{len(urls_to_scrape_list)} URLs in {duration:.2f} seconds.")
 
             if not scraped_sources_list:
-                yield from send_error("Failed to scrape any content.", fatal=True)
-                return
-            yield from send_progress(f"Finished scraping. Total successful: {total_scraped_successfully}")
+                yield from send_error_event("Failed to scrape any content successfully from the selected URLs.")
+                return # Terminate generator
+
+            # Sort scraped sources by original URL list order? Optional, but might be nice.
+            scraped_url_map = {item['url']: item for item in scraped_sources_list}
+            scraped_sources_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
+
 
             # === Bibliography Map ===
             url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_sources_list)
@@ -409,17 +595,41 @@ def stream():
             yield from send_event({'type': 'stream_start', 'target': 'synthesis'})
 
             context_for_llm_structured = scraped_sources_list
-            estimated_chars = sum(len(item['content']) for item in context_for_llm_structured)
-            yield from send_progress(f"  -> Context size: ~{estimated_chars // 1000}k chars")
+            estimated_chars = sum(len(item.get('content', '')) for item in context_for_llm_structured)
+            yield from send_progress(f"  -> Synthesis context size: ~{estimated_chars // 1000}k chars from {len(scraped_sources_list)} sources.")
 
-            # Note: Synthesis prompt uses regular f-string interpolation safely here
+            # Check estimated size vs potential model limits (very rough check)
+            # This depends heavily on the specific model and tokenization
+            if estimated_chars > 500000: # Example threshold (adjust based on model)
+                yield from send_progress("  -> Warning: Context size is large, synthesis might be slow or hit limits.")
+
+
             synthesis_prompt = f"""
-            Analyze scraped content about "{topic}" based on the plan, citing sources.
-            Research Plan: {json.dumps(research_plan, indent=2)}
-            Scraped Sources: {json.dumps(context_for_llm_structured, indent=2)}
-            Instructions: For each plan step, synthesize relevant info. **Crucially:** Cite every fact with `[Source URL: http://...]` immediately after. Output ONLY the Markdown synthesis per step, separated by ---. If nothing found, state it. No intro/summary here.
+            Analyze the following scraped web content related to the topic "{topic}", following the research plan provided.
+            Your goal is to synthesize the key information relevant to each step of the plan, citing sources accurately.
+
+            Research Topic: {topic}
+
+            Research Plan ({len(research_plan)} steps):
+            {json.dumps(research_plan, indent=2)}
+
+            Scraped Source Content (List of {len(context_for_llm_structured)} JSON objects, each with 'url' and 'content'):
+            ```json
+            {json.dumps(context_for_llm_structured, indent=2, ensure_ascii=False)}
+            ```
+
+            Instructions:
+            1. Process each step in the Research Plan sequentially.
+            2. For each step, carefully review ALL the scraped source content to find relevant information.
+            3. Extract and synthesize the most pertinent facts, findings, or data related *specifically* to that research step. Be concise and focus on unique information per step.
+            4. **Crucially and Mandatorily**: Immediately after stating **any** piece of information derived from a source, cite the source using the exact format: `[Source URL: <full_url_here>]`. Cite every claim. Do not group citations at the end of sentences or paragraphs.
+            5. If you cannot find relevant information for a specific plan step within the provided sources, explicitly state: "No specific information found for this step in the provided sources." Do not invent information.
+            6. Structure your output clearly using Markdown. Use a heading (e.g., `### Step X: <Step Description>`) for each plan step.
+            7. Output ONLY the synthesized information with inline citations, structured by plan step. Do NOT include an introduction, conclusion, summary, or any other text outside the step-by-step synthesis in this response. Separate each step's section clearly (e.g., using `---` between steps).
             """
             accumulated_synthesis = ""
+            synthesis_stream_error = None
+            synthesis_finish_reason = None
             try:
                 stream_generator = stream_gemini(synthesis_prompt)
                 for result in stream_generator:
@@ -427,30 +637,72 @@ def stream():
                         yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'synthesis'})
                         accumulated_synthesis += result['content']
                     elif result['type'] == 'stream_error':
-                        yield from send_error(f"LLM stream error during synthesis: {result['message']}", fatal=True)
-                        return
-            except Exception as e:
-                 yield from send_error(f"Error processing LLM synthesis stream: {e}", fatal=True)
-                 return
+                        synthesis_stream_error = result['message']
+                        yield from send_error_event(f"LLM stream error during synthesis: {synthesis_stream_error}")
+                        return # Terminate generator
+                    elif result['type'] == 'stream_warning':
+                         yield from send_progress(f"LLM Stream Warning (Synthesis): {result['message']}")
+                    elif result['type'] == 'stream_end':
+                         synthesis_finish_reason = result.get('finish_reason')
+                         if synthesis_finish_reason == 'length':
+                              yield from send_progress("Warning: Synthesis output might be truncated due to LLM length limits.")
+                         break # Exit loop cleanly on stream end
 
-            yield from send_progress("Synthesis stream finished.")
+                # Check if loop exited due to error caught *inside* stream_gemini
+                if synthesis_stream_error:
+                     return # Already sent error and terminated
+
+            except Exception as e:
+                 # Catch errors in *processing* the stream generator itself
+                 yield from send_error_event(f"Fatal error processing LLM synthesis stream: {e}")
+                 return # Terminate generator
+
+            yield from send_progress(f"Synthesis stream finished. (Finish reason: {synthesis_finish_reason or 'Normal'})")
+            # Check *after* stream completes if content is empty
             if not accumulated_synthesis.strip():
-                 yield from send_error("Synthesis resulted in empty content.", fatal=True)
-                 return
+                 yield from send_error_event("Synthesis resulted in empty content. The AI might not have found relevant information or failed to follow instructions.")
+                 return # Terminate generator
 
             # === Step 4: Generate Final Report (Streaming) ===
             yield from send_progress("Generating final report (AI Generating...)")
             yield from send_event({'type': 'stream_start', 'target': 'report'})
 
-            # Note: Report prompt uses regular f-string interpolation safely here
             report_prompt = f"""
-            Create a Markdown research report on "{topic}".
-            Plan: {json.dumps(research_plan, indent=2)}
-            Synthesized Info w/ URL Citations: {accumulated_synthesis}
-            Bibliography Map (URL to Number): {bibliography_prompt_list}
-            Instructions: Write Intro, Findings (per plan step), Conclusion. **Replace** `[Source URL: http://...]` with footnote markers `[^N]` based on the Bibliography Map. Append a `## Bibliography` section listing sources as `[^N]: [URL](URL)`. Output ONLY the final Markdown report.
+            Create a comprehensive Markdown research report on the topic: "{topic}".
+
+            You have the following inputs:
+            1. The Original Research Plan ({len(research_plan)} steps):
+               ```json
+               {json.dumps(research_plan, indent=2)}
+               ```
+
+            2. Synthesized Information with Raw URL Citations (Result of previous step):
+               ```markdown
+               {accumulated_synthesis}
+               ```
+
+            3. Bibliography Map (URL to Reference Number - {len(url_to_index_map)} sources):
+               ```
+               {bibliography_prompt_list}
+               ```
+
+            Instructions:
+            1. Write a final research report in Markdown format.
+            2. The report must include the following sections using Markdown headings:
+                - `# Research Report: {topic}` (Main Title)
+                - `## Introduction`: Briefly introduce the topic "{topic}" and outline the research scope based on the plan's steps.
+                - `## Findings`: Organize the main body according to the {len(research_plan)} research plan steps. For each step:
+                    - Use a subheading (e.g., `### Step X: <Step Description>`).
+                    - Integrate the relevant "Synthesized Information" for that step provided above.
+                    - **Crucially and Mandatorily: Replace every inline URL citation `[Source URL: <full_url_here>]` from the "Synthesized Information" with its corresponding Markdown footnote marker `[^N]`, using the "Bibliography Map" to find the correct number N.** Ensure the mapping is precise. If a URL citation appears in the synthesis that is *not* present in the Bibliography Map, you should omit that specific citation or rephrase the sentence slightly if the citation was critical. Do not invent footnote numbers.
+                - `## Conclusion`: Summarize the key findings derived from the synthesis across the plan steps. Briefly mention any limitations (e.g., steps where information was lacking) or potential areas for further research.
+            3. Append a `## Bibliography` section at the very end of the report.
+            4. In the Bibliography section, list all the sources from the "Bibliography Map" in numerical order (1, 2, 3...). Use the standard Markdown footnote definition format for each entry: `[^N]: [URL](URL)`. Ensure the URL is clickable in the final rendered HTML.
+            5. Ensure the final output is **only** the complete Markdown report, following the structure and formatting instructions precisely. Do not include any commentary, introductory text about the process, or explanations outside the report content itself.
             """
             accumulated_report = ""
+            report_stream_error = None
+            report_finish_reason = None
             try:
                 stream_generator = stream_gemini(report_prompt)
                 for result in stream_generator:
@@ -458,46 +710,68 @@ def stream():
                         yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'report'})
                         accumulated_report += result['content']
                     elif result['type'] == 'stream_error':
-                        yield from send_error(f"LLM stream error during report generation: {result['message']}", fatal=True)
-                        return
-            except Exception as e:
-                 yield from send_error(f"Error processing LLM report stream: {e}", fatal=True)
-                 return
+                        report_stream_error = result['message']
+                        yield from send_error_event(f"LLM stream error during report generation: {report_stream_error}")
+                        return # Terminate generator
+                    elif result['type'] == 'stream_warning':
+                         yield from send_progress(f"LLM Stream Warning (Report): {result['message']}")
+                    elif result['type'] == 'stream_end':
+                         report_finish_reason = result.get('finish_reason')
+                         if report_finish_reason == 'length':
+                              yield from send_progress("Warning: Final report output might be truncated due to LLM length limits.")
+                         break # Exit loop cleanly on stream end
 
-            yield from send_progress("Report stream finished.")
+                if report_stream_error:
+                     return # Already sent error and terminated
+
+            except Exception as e:
+                 yield from send_error_event(f"Fatal error processing LLM report stream: {e}")
+                 return # Terminate generator
+
+            yield from send_progress(f"Report stream finished. (Finish reason: {report_finish_reason or 'Normal'})")
             if not accumulated_report.strip():
-                 yield from send_error("Report generation resulted in empty content.", fatal=True)
-                 return
+                 yield from send_error_event("Report generation resulted in empty content.")
+                 return # Terminate generator
 
             # Convert final accumulated report Markdown to HTML
             try:
-                report_html = md_lib.markdown(accumulated_report, extensions=['footnotes', 'fenced_code', 'tables', 'nl2br'])
+                # Enable necessary Markdown extensions
+                report_html = md_lib.markdown(accumulated_report, extensions=['footnotes', 'fenced_code', 'tables', 'nl2br', 'attr_list'])
             except Exception as md_err:
-                 yield from send_error(f"Failed to convert final Markdown report to HTML: {md_err}")
-                 report_html = f"<pre>{accumulated_report}</pre>"
+                 yield from send_error_event(f"Failed to convert final Markdown report to HTML: {md_err}")
+                 # Fallback: show raw markdown safely escaped in pre tags
+                 from html import escape
+                 report_html = f"<pre>{escape(accumulated_report)}</pre>"
 
 
             # --- Send Final Completion Event ---
             final_data = {
                 'type': 'complete',
                 'report_html': report_html,
-                'raw_scraped_data_preview': json.dumps(scraped_sources_list[:1], indent=2)[:2000]
+                # Include a preview of the raw *successfully* scraped data
+                'raw_scraped_data_preview': json.dumps(scraped_sources_list[:2], indent=2, ensure_ascii=False)[:3000] + "..." if scraped_sources_list else "None"
             }
             yield from send_event(final_data)
+            end_time_total = time.time()
+            yield from send_progress(f"Research process completed successfully in {end_time_total - start_time_total:.2f} seconds.")
 
-        except StopIteration:
-             yield from send_progress("Process stopped due to fatal error.")
+        # Removed the outer StopIteration catch as it's no longer needed
         except Exception as e:
+            # Catch any unexpected errors in the main generator logic
             print(f"An unexpected error occurred during stream generation: {e}")
             import traceback
             traceback.print_exc()
-            error_msg = f"Unexpected server error: {type(e).__name__} - {e}"
-            yield from send_event({'type': 'error', 'message': error_msg})
+            error_msg = f"Unexpected server error during research process: {type(e).__name__} - {e}"
+            # Send the final error event before the generator stops
+            yield from send_error_event(error_msg)
+            # The generator will implicitly stop after this exception handler
 
+    # Make sure the topic is URL-encoded when passed to the EventSource URL
     return Response(stream_with_context(generate_updates()), content_type='text/event-stream')
 
 
 # --- Run the App ---
 if __name__ == '__main__':
-    # Ensure Markdown library is installed: pip install Markdown
-    app.run(debug=True, host='127.0.0.1', port=5001, threaded=True)
+    # Ensure libraries are installed: pip install Flask python-dotenv openai duckduckgo-search beautifulsoup4 requests lxml Markdown
+    # Consider performance implications of debug mode with threading/concurrency
+    app.run(debug=True, host='127.0.0.1', port=5001, threaded=True) # threaded=True is default and necessary for concurrent scraping

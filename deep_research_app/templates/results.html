@@ -1,27 +1,28 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light"> <!-- Kept data-theme="light" -->
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Research: {{ topic }}</title>
+    <title>Research: {{ topic }}</title> <!-- Display original topic -->
     <link rel="stylesheet" href="{{ pico_css }}">
     <style>
         body { padding-top: 1rem; padding-bottom: 3rem; }
-        main.container { max-width: 960px; } /* Wider container for results */
+        main.container { max-width: 960px; }
         h1, h2, h3 { margin-bottom: 0.5rem; }
         hr { margin: 2rem 0; }
         #progress-log-container {
-            max-height: 250px;
+            max-height: 300px; /* Increased height slightly */
             overflow-y: auto;
-            background-color: var(--pico-card-background-color); /* Consistent card background */
+            background-color: var(--pico-card-background-color);
             border: 1px solid var(--pico-card-border-color);
             padding: 1rem;
             border-radius: var(--pico-border-radius);
             margin-bottom: 1.5rem;
-            font-size: 0.875em; /* Smaller font for logs */
+            font-size: 0.875em;
         }
         #progress-log { list-style: none; padding-left: 0; margin: 0; }
-        #progress-log li { margin-bottom: 0.3rem; word-break: break-word; }
+        #progress-log li { margin-bottom: 0.3rem; word-break: break-word; line-height: 1.4; } /* Improved readability */
+        #progress-log li:first-child { font-weight: bold; } /* Highlight latest */
         #progress-log li.error { color: var(--pico-form-invalid-color); font-weight: bold; }
         .stream-container {
             border: 1px dashed var(--pico-primary-focus);
@@ -29,28 +30,34 @@
             margin-top: 1rem;
             margin-bottom: 1.5rem;
             border-radius: var(--pico-border-radius);
-            background-color: var(--pico-contrast-hover); /* Subtle background for streams */
-            display: none; /* Hidden initially */
-            white-space: pre-wrap; /* Preserve whitespace */
+            background-color: var(--pico-contrast-hover);
+            display: none;
+            white-space: pre-wrap;
             word-wrap: break-word;
             font-family: monospace;
             font-size: 0.9em;
+            max-height: 400px; /* Limit height for long streams */
+            overflow-y: auto;
         }
         .stream-container h4 { margin-top: 0; color: var(--pico-primary); }
         #final-report-container { margin-top: 2rem; }
         #final-report-content {
-            background-color: var(--pico-card-background-color); /* Changed from #fff for consistency */
+            background-color: var(--pico-card-background-color);
             padding: 1.5rem;
             border-radius: var(--pico-border-radius);
-            border: 1px solid var(--pico-card-border-color); /* Consistent card border */
+            border: 1px solid var(--pico-card-border-color);
          }
-        #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; }
+        #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; border-bottom: 1px solid var(--pico-muted-border-color); padding-bottom: 0.2em; } /* Style headings */
         #final-report-content h1:first-child, #final-report-content h2:first-child { margin-top: 0; }
-        #final-report-content sup a { text-decoration: none; } /* Footnote styling */
+        #final-report-content sup a { text-decoration: none; background-color: var(--pico-mark-background-color); padding: 1px 3px; border-radius: var(--pico-border-radius); color: var(--pico-mark-color); } /* Style footnotes */
+        #final-report-content sup a:hover { background-color: var(--pico-primary-focus); }
+        #final-report-content .footnotes { margin-top: 2em; padding-top: 1em; border-top: 1px solid var(--pico-card-border-color); font-size: 0.9em; }
         #final-report-content .footnotes ol { padding-left: 20px; }
+        #final-report-content .footnotes li { margin-bottom: 0.5em; }
         #error-container { margin-top: 1.5rem; }
-        /* Pico overrides/additions if needed */
-        article[aria-busy="true"]::before { /* Improve spinner size/position */
+        #error-container article { border-color: var(--pico-form-invalid-border-color); background-color: var(--pico-form-invalid-background-color); } /* Error styling */
+        #error-container header { color: var(--pico-form-invalid-color); }
+        article[aria-busy="true"]::before {
            width: 2rem;
            height: 2rem;
         }
@@ -60,13 +67,14 @@
     <main class="container">
         <hgroup>
             <h1>Research Progress</h1>
+            <!-- Display the original, unencoded topic -->
             <h2>Topic: {{ topic }}</h2>
         </hgroup>
         <a href="/" role="button" class="secondary outline">Start New Research</a>
         <hr>
 
         <!-- Progress Area -->
-        <article id="progress-area" aria-busy="true"> <!-- Show spinner while busy -->
+        <article id="progress-area" aria-busy="true">
             <h3>Live Progress Log</h3>
             <div id="progress-log-container">
                 <ul id="progress-log">
@@ -89,7 +97,7 @@
         <div id="error-container" style="display: none;">
             <article>
                 <header><strong>An Error Occurred</strong></header>
-                <p id="error-message" style="color: var(--pico-form-invalid-color);"></p>
+                <p id="error-message"></p> <!-- No need for inline style, use CSS -->
             </article>
         </div>
 
@@ -102,7 +110,7 @@
             </div>
              <details style="margin-top: 2rem;">
                  <summary>Raw Scraped Data Snippet (Debug)</summary>
-                 <pre id="scraped-preview" style="font-size: 0.8em; background: var(--pico-contrast);">Not available.</pre>
+                 <pre id="scraped-preview" style="font-size: 0.8em; background: var(--pico-contrast); max-height: 200px; overflow-y: auto;">Not available.</pre>
              </details>
         </section>
 
@@ -111,8 +119,8 @@
     </main>
 
     <script>
-        // Javascript remains the same
         const progressLog = document.getElementById('progress-log');
+        const progressLogContainer = document.getElementById('progress-log-container'); // Get container
         const progressArea = document.getElementById('progress-area');
         const finalReportContainer = document.getElementById('final-report-container');
         const finalReportContent = document.getElementById('final-report-content');
@@ -126,38 +134,45 @@
         const reportStreamContainer = document.getElementById('report-stream-container');
         const reportStreamContent = document.getElementById('report-stream-content');
 
-        const topic = "{{ topic|e }}"; // Get topic safely from Flask
+        // ***MODIFIED*** Get the URL-encoded topic passed from Flask
+        const encodedTopic = "{{ encoded_topic|e }}";
 
         let currentStreamTarget = null; // To track where LLM chunks should go ('synthesis' or 'report')
 
         function addProgress(message, isError = false) {
             const li = document.createElement('li');
-            li.textContent = message;
+            // Basic sanitization (replace < >)
+            li.textContent = message.replace(/</g, "<").replace(/>/g, ">");
             if (isError) {
                 li.classList.add('error');
             }
-            // progressLog.appendChild(li);
             progressLog.insertBefore(li, progressLog.firstChild); // Add to top
+            // Keep the log scrolled to the top (most recent)
+            progressLogContainer.scrollTop = 0;
         }
 
         function handleStreamChunk(content, target) {
             let targetEl;
+            let targetContainer;
             if (target === 'synthesis') {
                 targetEl = synthesisStreamContent;
+                targetContainer = synthesisStreamContainer;
                 synthesisStreamContainer.style.display = 'block';
             } else if (target === 'report') {
                 targetEl = reportStreamContent;
+                targetContainer = reportStreamContainer;
                 reportStreamContainer.style.display = 'block';
             } else {
                 return; // Unknown target
             }
-            targetEl.textContent += content; // Append chunk
-            // Auto-scroll the stream container (optional)
-            // targetEl.parentElement.scrollTop = targetEl.parentElement.scrollHeight;
+            // Append chunk (using textContent is safer against potential XSS in chunks)
+            targetEl.textContent += content;
+            // Auto-scroll the stream container to the bottom
+            targetContainer.scrollTop = targetContainer.scrollHeight;
         }
 
-        // Establish SSE connection
-        const params = new URLSearchParams({ topic: topic });
+        // Establish SSE connection using the encoded topic
+        const params = new URLSearchParams({ topic: encodedTopic });
         const eventSource = new EventSource(`/stream?${params.toString()}`);
 
         eventSource.onmessage = function(event) {
@@ -169,18 +184,26 @@
                         addProgress(`[${new Date().toLocaleTimeString()}] ${data.message}`);
                         break;
                     case 'error':
-                        addProgress(`ERROR: ${data.message}`, true);
-                        errorMessage.textContent = data.message;
+                        const errorMsgText = `ERROR: ${data.message}`;
+                        addProgress(errorMsgText, true);
+                        errorMessage.textContent = errorMsgText;
                         errorContainer.style.display = 'block';
                         progressArea.removeAttribute('aria-busy'); // Stop spinner
-                        eventSource.close();
+                        // Keep stream open for potential further errors, but stop main process indicator
+                        // eventSource.close(); // Don't close here, let server close or onerror handle it
                         break;
                     case 'stream_start': // LLM stream starting
                          currentStreamTarget = data.target; // e.g., 'synthesis' or 'report'
                          addProgress(`AI starting to generate: ${currentStreamTarget}...`);
-                         // Show the correct container
-                         if (currentStreamTarget === 'synthesis') synthesisStreamContainer.style.display = 'block';
-                         if (currentStreamTarget === 'report') reportStreamContainer.style.display = 'block';
+                         // Show the correct container and clear previous content if any
+                         if (currentStreamTarget === 'synthesis') {
+                             synthesisStreamContent.textContent = ''; // Clear old content
+                             synthesisStreamContainer.style.display = 'block';
+                         }
+                         if (currentStreamTarget === 'report') {
+                             reportStreamContent.textContent = ''; // Clear old content
+                             reportStreamContainer.style.display = 'block';
+                         }
                          break;
                     case 'llm_chunk': // Chunk of LLM text arrived
                          if (currentStreamTarget === data.target) {
@@ -193,12 +216,11 @@
                         finalReportContent.innerHTML = data.report_html; // Render final formatted report
                         if (data.raw_scraped_data_preview) {
                            scrapedPreview.textContent = data.raw_scraped_data_preview;
+                        } else {
+                           scrapedPreview.textContent = "Not available.";
                         }
                         finalReportContainer.style.display = 'block'; // Show report section
-                        // Optionally hide streaming containers now
-                        // synthesisStreamContainer.style.display = 'none';
-                        // reportStreamContainer.style.display = 'none';
-                        eventSource.close();
+                        eventSource.close(); // Research is done, close connection
                         break;
                 }
             } catch (e) {
@@ -209,16 +231,25 @@
 
         eventSource.onerror = function(err) {
             console.error("EventSource failed:", err);
-            const errorMsg = "Connection to server lost or failed during research. Please try again.";
-            addProgress(errorMsg, true);
-            errorMessage.textContent = errorMsg;
-            errorContainer.style.display = 'block';
-            progressArea.removeAttribute('aria-busy'); // Stop spinner
-            if (eventSource) eventSource.close();
+            // Check readyState: 0=CONNECTING, 1=OPEN, 2=CLOSED
+            if (eventSource.readyState === EventSource.CLOSED) {
+                 addProgress("Server connection closed.", false); // Normal if process finished or server stopped
+            } else if (eventSource.readyState === EventSource.CONNECTING) {
+                 addProgress("Connection lost, attempting to reconnect...", true);
+                 // Browser usually handles reconnect automatically unless server is down
+            } else {
+                const errorMsg = "Connection to server lost or failed unexpectedly. Please try starting new research.";
+                addProgress(errorMsg, true);
+                errorMessage.textContent = errorMsg;
+                errorContainer.style.display = 'block';
+                progressArea.removeAttribute('aria-busy'); // Stop spinner
+                if (eventSource) eventSource.close(); // Explicitly close on definite error
+            }
         };
 
         window.addEventListener('beforeunload', () => {
             if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+                console.log("Closing EventSource connection on page unload.");
                 eventSource.close();
             }
         });
