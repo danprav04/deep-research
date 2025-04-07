@@ -18,16 +18,18 @@ from urllib.parse import quote, unquote
 import concurrent.futures
 from io import BytesIO
 
-# --- NEW: Import pypandoc ---
+# --- CHANGED: Import pypandoc and add a more robust check ---
+PANDOC_AVAILABLE = False
 try:
+    # Recommend installing pypandoc-binary for bundled executable
     import pypandoc
+    # Try getting the path at startup. This is a more reliable check.
+    pandoc_path = pypandoc.get_pandoc_path()
+    print(f"INFO: Found pandoc executable at: {pandoc_path}")
     PANDOC_AVAILABLE = True
-except ImportError:
-    print("WARNING: pypandoc library not found. DOCX download will be disabled. Install with 'pip install pypandoc'")
-    PANDOC_AVAILABLE = False
-except OSError:
-    # This catches if pypandoc is installed but the pandoc executable isn't found
-    print("WARNING: Pandoc executable not found in system PATH. DOCX download will be disabled. Ensure Pandoc is installed and in PATH: https://pandoc.org/installing.html")
+except (ImportError, OSError) as e:
+    print(f"WARNING: pypandoc or the pandoc executable not found. DOCX download will be disabled. Error: {e}")
+    print("RECOMMENDATION: Install 'pypandoc-binary' (pip install pypandoc-binary) which includes the executable.")
     PANDOC_AVAILABLE = False
 
 
@@ -35,17 +37,18 @@ except OSError:
 load_dotenv()
 # --- CHANGED: Use Google API Key and Model Name ---
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-# Use a valid Google model name (e.g., gemini-1.5-pro-latest, gemini-1.5-flash-latest, gemini-pro)
-GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME", "gemini-1.5-pro-latest")
-# --- REMOVED: OpenRouter Base URL ---
-# OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+# Use a valid Google model name (e.g., gemini-1.5-pro-latest, gemini-1.5-flash-latest)
+# Corrected default model name
+GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME", "gemini-1.5-flash-latest") # Changed default
 
 MAX_SEARCH_RESULTS_PER_STEP = 10
 MAX_TOTAL_URLS_TO_SCRAPE = 100
 MAX_WORKERS = 10
 REQUEST_TIMEOUT = 12
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36" # Updated UA string
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
 PICO_CSS_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"
+# --- NEW: Delay between DDGS searches to avoid rate limiting ---
+DDGS_SEARCH_DELAY_SECONDS = 1.5
 
 # --- Initialize Flask App ---
 app = Flask(__name__)
@@ -56,6 +59,9 @@ if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY environment variable not set.")
 try:
     genai.configure(api_key=GOOGLE_API_KEY)
+    # Optionally check available models
+    # models = [m.name for m in genai.list_models()]
+    # print("Available Google Models:", models)
 except Exception as e:
     raise RuntimeError(f"Failed to configure Google Generative AI: {e}")
 
@@ -64,75 +70,77 @@ except Exception as e:
 # --- REFACTORED: call_gemini to use Google API ---
 def call_gemini(prompt, system_prompt=None, max_retries=3, delay=5):
     """Calls the specified Google Gemini model with retry logic."""
-    # Combine system prompt and user prompt if system prompt exists
-    # Google's API often takes a single prompt string or specific system_instruction
     full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
 
     generation_config = genai.types.GenerationConfig(
-        # candidate_count=1, # Default is 1
-        # stop_sequences=["..."], # Optional stop sequences
-        # max_output_tokens=8192, # Optional max tokens for the response
         temperature=0.6,
-        # top_p=0.9, # Optional nucleus sampling
-        # top_k=40   # Optional top-k sampling
+        # max_output_tokens=8192 # Set if needed, depends on model
     )
-
-    # Define safety settings (Optional, example: block less)
-    # safety_settings = {
-    #     HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-    #     HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-    #     HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-    #     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-    # }
+    # Basic safety settings (adjust as needed)
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    }
 
     for attempt in range(max_retries):
         try:
-            # Initialize the model for each attempt (or can be done once outside)
             model = genai.GenerativeModel(
                 GOOGLE_MODEL_NAME,
                 generation_config=generation_config,
-                # safety_settings=safety_settings, # Apply safety settings if defined
-                system_instruction=system_prompt if system_prompt else None # Use dedicated system instruction param if available and preferred
+                safety_settings=safety_settings,
+                system_instruction=system_prompt if system_prompt else None
             )
+            effective_prompt = prompt if system_prompt else full_prompt
 
-            # Use the combined prompt if system_instruction isn't used or needs supplementing
-            effective_prompt = prompt if system_prompt else full_prompt # Adjust based on how system_instruction is handled
+            # print(f"--- Calling Google Model ({GOOGLE_MODEL_NAME}) ---") # Debug
+            response = model.generate_content(effective_prompt)
+            # print(f"--- Raw Google Response --- \n{response}\n--- End Raw Response ---") # Debug
 
-            response = model.generate_content(effective_prompt) # Send the prompt
+            # More robust check for blocking/empty response
+            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                 block_reason = str(response.prompt_feedback.block_reason)
+                 safety_ratings_str = str(getattr(response.prompt_feedback, 'safety_ratings', 'N/A'))
+                 raise ValueError(f"API response blocked by safety settings. Block Reason: {block_reason}. Safety Ratings: {safety_ratings_str}")
 
-            # Check for blocking or empty response *before* accessing .text
             if not response.candidates:
-                 block_reason = getattr(response.prompt_feedback, 'block_reason', 'Unknown')
-                 safety_ratings = getattr(response.prompt_feedback, 'safety_ratings', [])
-                 raise ValueError(f"API response blocked or empty. Block Reason: {block_reason}. Safety Ratings: {safety_ratings}")
+                 # This case might occur if severely blocked or other issues
+                 finish_details = getattr(response, 'finish_details', 'N/A') # Check if other finish details exist
+                 raise ValueError(f"API response contained no candidates. Finish Details: {finish_details}")
 
-            # Check if the first candidate has content
-            if not response.candidates[0].content or not response.candidates[0].content.parts:
-                 finish_reason = getattr(response.candidates[0], 'finish_reason', 'Unknown')
-                 # FinishReason often indicates issues like length, safety, recitation etc.
-                 raise ValueError(f"API response candidate has no content parts. Finish Reason: {finish_reason}")
+            # Check the first candidate specifically
+            candidate = response.candidates[0]
+            if candidate.finish_reason not in [None, 1, "STOP", "MAX_TOKENS"]: # 1 == Stop for some versions
+                # Other reasons: SAFETY, RECITATION, OTHER
+                 raise ValueError(f"API response candidate finished unexpectedly. Finish Reason: {candidate.finish_reason}. Safety Ratings: {getattr(candidate, 'safety_ratings', 'N/A')}")
 
 
-            # Access the text content
-            response_content = response.text.strip()
+            # Access the text content safely
+            if not candidate.content or not candidate.content.parts:
+                 # This can happen even if not explicitly blocked, e.g., empty generation
+                 raise ValueError(f"API response candidate has no content parts. Finish Reason: {candidate.finish_reason}")
+
+            response_content = response.text.strip() # response.text conveniently joins parts
             if not response_content:
-                 raise ValueError("API response generated empty text content.")
+                 raise ValueError("API response generated empty text content after successful call.")
 
             return response_content
 
         except Exception as e:
-            # Catch potential Google API specific errors if needed, e.g., google.api_core.exceptions.GoogleAPIError
             print(f"Error calling Google Gemini API (Attempt {attempt + 1}/{max_retries}): {e}")
-            # Check if the error suggests the prompt was too long (this might be model/API version specific)
-            if "prompt" in str(e).lower() and ("too long" in str(e).lower() or "size" in str(e).lower()):
-                print("Prompt might be too long for the model's context window.")
-                # Optionally shorten the prompt here if feasible, or just fail
+            if "API key not valid" in str(e):
+                 print("Critical Error: Invalid Google API Key.")
+                 raise # Don't retry on invalid key
+            if "quota" in str(e).lower():
+                 print("Warning: Quota possibly exceeded.")
+                 # Optionally increase delay or stop retrying for quota
             if attempt < max_retries - 1:
                 print(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
             else:
                 print("Max retries reached. Failing LLM call.")
-                raise # Re-raise the last exception
+                raise
 
 # --- REFACTORED: stream_gemini to use Google API ---
 def stream_gemini(prompt, system_prompt=None):
@@ -143,88 +151,84 @@ def stream_gemini(prompt, system_prompt=None):
 
     generation_config = genai.types.GenerationConfig(
         temperature=0.6,
-        # max_output_tokens=8192 # Consider setting if needed
+        # max_output_tokens=8192 # Set if needed
     )
-
-    # Define safety settings (Optional, example: block none for less interruption, use with caution)
-    # safety_settings = {
-    #     HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-    #     HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-    #     HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-    #     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-    # }
-
+    safety_settings = { # Same safety settings as non-streaming
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    }
 
     try:
         model = genai.GenerativeModel(
             GOOGLE_MODEL_NAME,
             generation_config=generation_config,
-            # safety_settings=safety_settings, # Apply safety settings if defined
+            safety_settings=safety_settings,
             system_instruction=system_prompt if system_prompt else None
         )
-
         effective_prompt = prompt if system_prompt else full_prompt
 
-        # Start the streaming generation
         stream = model.generate_content(effective_prompt, stream=True)
+        # print(f"--- Streaming Google Model ({GOOGLE_MODEL_NAME}) ---") # Debug
 
         complete_response_text = ""
-        finish_reason = None # Google's stream might not yield this per chunk easily
+        stream_blocked = False
 
         for chunk in stream:
-             # Check for blocking reasons within the chunk's prompt feedback
+             # Check for blocking reasons within the chunk's prompt feedback first
              if chunk.prompt_feedback and chunk.prompt_feedback.block_reason:
                   block_reason_str = str(chunk.prompt_feedback.block_reason)
-                  print(f"Warning: LLM stream blocked during generation. Reason: {block_reason_str}")
-                  yield {'type': 'stream_warning', 'message': f'LLM stream may have been blocked due to safety filters (Reason: {block_reason_str}). Output may be incomplete.'}
-                  # Depending on severity, you might want to break or return here
-                  # break # Stop processing if blocked
+                  safety_ratings_str = str(getattr(chunk.prompt_feedback, 'safety_ratings', 'N/A'))
+                  print(f"ERROR: LLM stream blocked by prompt safety filters. Reason: {block_reason_str}. Ratings: {safety_ratings_str}")
+                  yield {'type': 'stream_error', 'message': f'LLM prompt blocked by safety filters (Reason: {block_reason_str}). Cannot generate response.'}
+                  stream_blocked = True
+                  break # Stop processing if the prompt itself was blocked
 
-             # Check if the chunk has text content
-             if hasattr(chunk, 'text') and chunk.text:
+             # Check for blocking during generation (in candidate)
+             if not stream_blocked and chunk.candidates:
+                 candidate = chunk.candidates[0]
+                 if candidate.finish_reason and candidate.finish_reason not in [None, 1, "STOP", "MAX_TOKENS"]:
+                     finish_reason_str = str(candidate.finish_reason)
+                     safety_ratings_str = str(getattr(candidate, 'safety_ratings', 'N/A'))
+                     print(f"WARNING: LLM stream stopped during generation. Reason: {finish_reason_str}. Safety: {safety_ratings_str}")
+                     yield {'type': 'stream_warning', 'message': f'LLM stream may have been interrupted or blocked during generation (Reason: {finish_reason_str}). Output may be incomplete.'}
+                     # Decide whether to break based on reason (e.g., break for SAFETY)
+                     if finish_reason_str == "SAFETY":
+                         stream_blocked = True # Treat as blocked
+                         break
+
+             # Yield text content if available and not blocked
+             if not stream_blocked and hasattr(chunk, 'text') and chunk.text:
                   chunk_text = chunk.text
                   complete_response_text += chunk_text
                   yield {'type': 'chunk', 'content': chunk_text}
-             else:
-                  # Log if a chunk seems empty but no block reason was given
-                  # print(f"Debug: Received chunk with no text: {chunk}") # Uncomment for debugging
-                  pass
+             # else: # Debugging for empty chunks
+                  # if not stream_blocked: print(f"Debug: Received chunk with no text: {chunk}")
 
-        # After the loop, the stream is finished.
-        # We can try to get the final finish reason from the resolved stream response,
-        # though accessing it directly after iteration might require specific handling
-        # or inspection of the 'stream' object's final state if the library supports it.
-        # For now, we rely on detecting blocks during iteration.
-        # Let's check the complete response length against potential limits (heuristic)
-        # This is not a perfect replacement for the explicit 'length' finish_reason.
-        # We might need to inspect `stream.candidates[0].finish_reason` if the stream object allows it after iteration.
-
-        # Example (conceptual - library might behave differently):
-        # try:
-        #     final_candidate = stream.candidates[0] # Accessing after iteration might raise error
-        #     finish_reason = str(final_candidate.finish_reason) if final_candidate else 'Unknown'
-        # except Exception:
-        #     finish_reason = 'Unknown (Iteration Complete)'
-
-        # Simplified end event:
-        yield {'type': 'stream_end', 'finish_reason': finish_reason or 'IterationComplete'}
+        # Send end event only if the stream wasn't explicitly blocked early
+        if not stream_blocked:
+             yield {'type': 'stream_end', 'finish_reason': 'IterationComplete'} # Simple end signal
 
     except Exception as e:
-        # Handle potential API errors, including configuration or quota issues
         print(f"Error during Google Gemini stream: {e}")
         error_message = f"LLM stream error: {e}"
-        # Check if error suggests context length issue
-        if "prompt" in str(e).lower() and ("too long" in str(e).lower() or "size" in str(e).lower()):
+        if "API key not valid" in str(e):
+            error_message = f"LLM stream error: Invalid Google API Key. ({e})"
+        elif "quota" in str(e).lower():
+            error_message = f"LLM stream error: Quota likely exceeded. ({e})"
+        elif "resource has been exhausted" in str(e).lower(): # Another quota message
+             error_message = f"LLM stream error: Quota likely exceeded (Resource Exhausted). ({e})"
+        elif "prompt" in str(e).lower() and ("too long" in str(e).lower() or "size" in str(e).lower()):
              error_message = f"LLM stream error: Prompt likely too long for the model's context window. ({e})"
-        elif "resource has been exhausted" in str(e).lower():
-             error_message = f"LLM stream error: Quota likely exceeded. ({e})"
 
         yield {'type': 'stream_error', 'message': error_message}
 
 
-# parse_research_plan - No changes needed from previous version
+# parse_research_plan - No changes needed from previous correct version
 def parse_research_plan(llm_response):
-    # --- (Keep the robust parser from previous step) ---
+    # ... (keep the robust parser from previous step) ...
+    # (Code is identical to the previous version, omitted for brevity)
     plan = []
     if not llm_response:
         print("Error: Received empty response from LLM for plan generation.")
@@ -369,80 +373,127 @@ def parse_research_plan(llm_response):
     return [{"step_description": fail_msg, "keywords": []}]
 
 
-# search_duckduckgo - No changes needed
-def search_duckduckgo(keywords, max_results=MAX_SEARCH_RESULTS_PER_STEP):
-    """Performs a search on DuckDuckGo using the library."""
+# search_duckduckgo - Added retry logic for rate limiting
+def search_duckduckgo(keywords, max_results=MAX_SEARCH_RESULTS_PER_STEP, max_retries=2, initial_delay=DDGS_SEARCH_DELAY_SECONDS):
+    """Performs a search on DuckDuckGo using the library with retry for rate limits."""
     query = " ".join(keywords)
     urls = []
-    if not query: return [] # Handle empty keywords
+    if not query: return []
     print(f"  -> DDGS Searching for: '{query}' (max_results={max_results})")
-    try:
-        with DDGS(timeout=15) as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-            urls = [r['href'] for r in results if r and 'href' in r]
-            print(f"  -> DDGS Found {len(urls)} URLs for '{query}'")
-    except Exception as e:
-        print(f"Error searching DuckDuckGo for '{query}': {e}")
-    return urls
 
-# scrape_url - No changes needed from previous version
+    delay = initial_delay # Use the base delay between *different* searches initially
+
+    for attempt in range(max_retries + 1):
+        try:
+            with DDGS(timeout=15) as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+                urls = [r['href'] for r in results if r and 'href' in r]
+                print(f"  -> DDGS Found {len(urls)} URLs for '{query}'")
+                return urls # Success
+        except Exception as e:
+            # Check if the error looks like a rate limit (heuristic)
+            # DDGS library might raise specific exceptions in future, but for now check string
+            is_rate_limit = "Ratelimit" in str(e) or "202" in str(e) or "429" in str(e)
+
+            if is_rate_limit and attempt < max_retries:
+                retry_delay = delay * (2 ** attempt) # Exponential backoff for retries
+                print(f"  -> DDGS Rate limit detected for '{query}'. Retrying attempt {attempt + 1}/{max_retries} in {retry_delay:.1f} seconds...")
+                time.sleep(retry_delay)
+                continue # Go to next attempt
+            else:
+                # Log non-rate-limit errors or final rate limit failure
+                print(f"Error searching DuckDuckGo for '{query}' (Attempt {attempt+1}): {e}")
+                if is_rate_limit:
+                    print(f"  -> Max retries reached for rate limit on '{query}'.")
+                return [] # Return empty list on persistent failure
+
+    return [] # Should not be reached if loop logic is correct
+
+# scrape_url - No changes needed, already handles errors well
 def scrape_url(url):
     """
-    Scrapes text content from a given URL.
+    Scrapes text content from a given URL. Handles common errors.
     Returns a dictionary {'url': url, 'content': text} on success, None on failure.
     """
     log_url = url[:75] + '...' if len(url) > 75 else url
+    # print(f"Attempting scrape: {log_url}") # Debug
     try:
         headers = {'User-Agent': USER_AGENT}
+        # Consider adding 'Accept' header
+        # headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8'
         response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True, stream=True)
-        response.raise_for_status()
+        response.raise_for_status() # Check for 4xx/5xx errors immediately
 
         content_type = response.headers.get('content-type', '').lower()
-        if 'html' not in content_type:
-            print(f"Skipping non-HTML content: {log_url} (Type: {content_type})")
+        # Slightly broader check for text content, but prioritize html
+        if 'html' not in content_type and 'text' not in content_type:
+            print(f"Skipping non-HTML/text content: {log_url} (Type: {content_type})")
             response.close()
             return None
 
         content_length = response.headers.get('content-length')
-        if content_length and int(content_length) > 10 * 1024 * 1024: # 10MB limit
-            print(f"Skipping large file (>10MB): {log_url}")
+        # Check content length *before* reading the whole thing if possible
+        MAX_CONTENT_LENGTH_MB = 10
+        if content_length and int(content_length) > MAX_CONTENT_LENGTH_MB * 1024 * 1024:
+            print(f"Skipping large file (>{MAX_CONTENT_LENGTH_MB}MB): {log_url}")
             response.close()
             return None
 
-        html_content = response.content # Read content
-        response.close() # Close connection
+        # Read content now, add another size check during read if needed
+        html_content = response.content # Reads the entire content
+        response.close() # Close the connection after reading
 
+        # Check size again after reading if header was missing
+        if not content_length and len(html_content) > MAX_CONTENT_LENGTH_MB * 1024 * 1024:
+             print(f"Skipping large file discovered after download (>{MAX_CONTENT_LENGTH_MB}MB): {log_url}")
+             return None
+
+        # Try lxml first, fallback to html.parser
         try:
             soup = BeautifulSoup(html_content, 'lxml')
-        except Exception:
-            soup = BeautifulSoup(html_content, 'html.parser')
+        except Exception: # Catch potential lxml parsing errors too
+            try:
+                soup = BeautifulSoup(html_content, 'html.parser')
+            except Exception as parse_err:
+                print(f"Failed to parse HTML for {log_url} with both lxml and html.parser: {parse_err}")
+                return None
 
-        for element in soup(["script", "style", "nav", "footer", "aside", "header", "form", "button", "input", "textarea", "select", "img", "figure", "iframe", "video", "audio", "picture", "source", "noscript", "meta", "link"]):
+        # Remove unwanted tags aggressively
+        for element in soup(["script", "style", "nav", "footer", "aside", "header", "form", "button", "input", "textarea", "select", "img", "figure", "iframe", "video", "audio", "picture", "source", "noscript", "meta", "link", "svg", "canvas", "map", "area"]):
             element.decompose()
 
+        # Try finding common main content containers
         main_content = soup.find('main') or \
                        soup.find('article') or \
                        soup.find('div', attrs={'role': 'main'}) or \
+                       soup.find('section', id='content') or \
                        soup.find('div', id='content') or \
-                       soup.find('div', class_=re.compile(r'\b(content|main|post|entry)\b', re.I)) or \
+                       soup.find('div', class_=re.compile(r'\b(content|main|post|entry|article[-_]body|body[-_]content)\b', re.I)) or \
                        soup.find('div', id=re.compile(r'\b(content|main)\b', re.I))
 
         if main_content:
              text = main_content.get_text(separator='\n', strip=True)
         else:
+            # Fallback to body if no specific main content found
              body = soup.find('body')
              if body:
                  text = body.get_text(separator='\n', strip=True)
              else:
+                 # Absolute fallback if even body tag is missing (unlikely for valid HTML)
                  text = soup.get_text(separator='\n', strip=True)
 
+        # Cleaning the extracted text
         lines = (line.strip() for line in text.splitlines())
-        chunks = (' '.join(phrase.split()) for line in lines for phrase in line.split("  ") if phrase.strip())
-        cleaned_text = '\n'.join(chunk for chunk in chunks if chunk and len(chunk.split()) > 3)
+        # Break multi-sentence lines into potential paragraphs, then strip whitespace aggressively
+        chunks = (' '.join(phrase.split()) for line in lines for phrase in line.split("  ") if phrase.strip()) # Replace multiple spaces
+        # Rejoin, keeping meaningful lines (more than just a couple of short words)
+        cleaned_text = '\n'.join(chunk for chunk in chunks if chunk and len(chunk.split()) > 2) # Keep lines with > 2 words
 
-        meaningful_word_count = len([word for word in cleaned_text.split() if len(word) > 2])
-        if meaningful_word_count < 75:
-             # print(f"Skipping due to low meaningful content ({meaningful_word_count} words): {log_url}") # Less verbose
+        # Final check for meaningful content length
+        MIN_MEANINGFUL_WORDS = 50 # Adjusted threshold
+        meaningful_word_count = len([word for word in cleaned_text.split() if len(word) > 1]) # Count words > 1 char
+        if meaningful_word_count < MIN_MEANINGFUL_WORDS:
+             # print(f"Skipping due to low meaningful content ({meaningful_word_count} words < {MIN_MEANINGFUL_WORDS}): {log_url}") # Less verbose
              return None
 
         # print(f"Successfully scraped: {log_url} ({len(cleaned_text)} chars)") # Less verbose
@@ -450,18 +501,27 @@ def scrape_url(url):
 
     except requests.exceptions.Timeout:
         print(f"Timeout error fetching URL {log_url}")
+    except requests.exceptions.HTTPError as e:
+         # Specifically log HTTP errors (like 403, 404, 500)
+        print(f"HTTP Error {e.response.status_code} fetching URL {log_url}: {e}")
     except requests.exceptions.RequestException as e:
-        if hasattr(e, 'response') and e.response is not None:
-            print(f"HTTP Error {e.response.status_code} fetching URL {log_url}: {e}")
-        else:
-            print(f"Request Error fetching URL {log_url}: {e}")
+        # Catch other request errors (DNS, connection, etc.)
+        print(f"Request Error fetching URL {log_url}: {e}")
     except Exception as e:
-        print(f"Error parsing or processing URL {log_url}: {e}")
+        # Catch-all for other unexpected errors (parsing, processing)
+        print(f"Error parsing or processing URL {log_url}: {type(e).__name__} - {e}")
+        # import traceback # Uncomment for deep debugging if needed
+        # traceback.print_exc()
     finally:
-        if 'response' in locals() and response and not response.raw.closed:
-            response.close()
+        # Ensure response is closed in case of exceptions before reading content fully
+        if 'response' in locals() and response and hasattr(response, 'close') and callable(response.close):
+             try:
+                 response.close()
+             except Exception:
+                 pass # Ignore errors during close
 
     return None
+
 
 # generate_bibliography_map - No changes needed
 def generate_bibliography_map(scraped_sources_list):
@@ -492,9 +552,10 @@ def stream():
     encoded_topic = request.args.get('topic', '')
     topic = unquote(encoded_topic)
     if not topic:
-        topic = "Default Topic"
+        topic = "Default Topic - No Topic Provided" # More informative default
 
     def generate_updates():
+        # ... (Variable initializations remain the same) ...
         scraped_sources_list = []
         all_found_urls_set = set()
         urls_to_scrape_list = []
@@ -504,6 +565,7 @@ def stream():
         url_to_index_map = {}
         start_time_total = time.time()
 
+
         def send_event(data):
             """Helper to format and yield SSE events."""
             try:
@@ -511,8 +573,14 @@ def stream():
                 yield f"data: {payload}\n\n"
             except TypeError as e:
                 print(f"Error serializing data for SSE: {e}. Data: {data}")
-                error_payload = json.dumps({'type': 'error', 'message': f"Internal server error: Could not serialize data - {e}"})
-                yield f"data: {error_payload}\n\n"
+                # Try serializing a safe version
+                try:
+                    safe_data = {'type': data.get('type', 'error'), 'message': f"Serialization Error: {e}"}
+                    payload = json.dumps(safe_data)
+                    yield f"data: {payload}\n\n"
+                except Exception: # Fallback if even that fails
+                    yield "data: {\"type\": \"error\", \"message\": \"Internal server error during SSE serialization\"}\n\n"
+
 
         def send_progress(message):
             yield from send_event({'type': 'progress', 'message': message})
@@ -525,11 +593,11 @@ def stream():
         try:
             # === Step 1: Generate Research Plan ===
             yield from send_progress(f"Generating research plan for: '{topic}' using {GOOGLE_MODEL_NAME}...")
-            # Prompt remains the same, asking for JSON structure
+            # Prompt remains the same
             plan_prompt = f"""
             Create a detailed, step-by-step research plan with 10-15 distinct steps for the topic: "{topic}"
             Each step should represent a specific question or area of inquiry related to the topic.
-            Format the output STRICTLY as a JSON list of objects. Each object must have two keys:
+            Format the output STRICTLY as a JSON list of objects within a ```json ... ``` block. Each object must have two keys:
             1. "step": A string describing the research step/question.
             2. "keywords": A list of 2-4 relevant keyword strings for searching about this step.
 
@@ -542,29 +610,32 @@ def stream():
             ]
             ```
 
-            Ensure the output is ONLY the valid JSON list, enclosed in ```json ... ``` markdown block. No introductory text, no explanations outside the JSON block.
+            Ensure the output is ONLY the valid JSON list inside the markdown block. No introductory text, no explanations outside the JSON block.
             Generate 10 to 15 relevant steps for the specific topic: "{topic}".
             """
             try:
-                # Use the refactored call_gemini
-                plan_response = call_gemini(plan_prompt) # No system prompt needed here as it's in the main prompt
+                plan_response = call_gemini(plan_prompt)
             except Exception as e:
                  yield from send_error_event(f"Failed to generate research plan from LLM ({GOOGLE_MODEL_NAME}): {e}")
-                 return # Terminate generator
+                 return
 
             research_plan = parse_research_plan(plan_response)
 
-            if not research_plan or not isinstance(research_plan, list) or \
+            # Improved check for failed parsing
+            if not research_plan or not isinstance(research_plan, list) or not all(isinstance(step, dict) and 'step_description' in step and 'keywords' in step for step in research_plan) or \
                (len(research_plan) == 1 and research_plan[0]["step_description"].startswith("Failed")):
-                 fail_reason = research_plan[0]["step_description"] if (research_plan and isinstance(research_plan, list) and research_plan[0].get("step_description")) else "Could not parse plan from LLM response."
-                 raw_snippet = f" Raw Response Snippet: '{plan_response[:150]}...'" if plan_response else ""
-                 yield from send_error_event(f"Failed to create or parse a valid research plan. {fail_reason}{raw_snippet}")
-                 return # Terminate generator
+                 fail_reason = "Could not parse valid plan structure."
+                 if research_plan and isinstance(research_plan, list) and research_plan[0].get("step_description", "").startswith("Failed"):
+                      fail_reason = research_plan[0]["step_description"] # Use specific failure message if available
+                 raw_snippet = f" Raw LLM Response Snippet: '{plan_response[:150]}...'" if plan_response else " (LLM Response was empty)"
+                 yield from send_error_event(f"Failed to create or parse a valid research plan. Reason: {fail_reason}.{raw_snippet}")
+                 return
 
             yield from send_progress(f"Generated {len(research_plan)} step plan:")
             log_limit = 5
             for i, step in enumerate(research_plan[:log_limit]):
-                 yield from send_progress(f"  {i+1}. {step['step_description']} (Keywords: {', '.join(step.get('keywords',[]))[:50]}...)")
+                 kw_str = ', '.join(step.get('keywords',[]))
+                 yield from send_progress(f"  {i+1}. {step['step_description']} (Keywords: {kw_str[:60]}{'...' if len(kw_str)>60 else ''})")
             if len(research_plan) > log_limit:
                  yield from send_progress(f"  ... and {len(research_plan) - log_limit} more steps.")
 
@@ -573,61 +644,77 @@ def stream():
             start_search_time = time.time()
             urls_collected_count = 0
             all_urls_from_search = []
+            search_step_errors = 0
             for i, step in enumerate(research_plan):
                 step_desc = step.get('step_description', f'Unnamed Step {i+1}')
                 keywords = step.get('keywords', [])
 
-                yield from send_progress(f"Searching - Step {i+1}/{len(research_plan)}: '{step_desc}'")
+                yield from send_progress(f"Searching - Step {i+1}/{len(research_plan)}: '{step_desc[:70]}{'...' if len(step_desc)>70 else ''}'")
                 if not keywords:
                     yield from send_progress("  -> No keywords provided, skipping search for this step.")
                     continue
 
-                step_search_results = search_duckduckgo(keywords, MAX_SEARCH_RESULTS_PER_STEP)
+                # Use search function with built-in delay and retry
+                step_search_results = search_duckduckgo(
+                    keywords,
+                    MAX_SEARCH_RESULTS_PER_STEP,
+                    initial_delay=0 # Don't add extra delay before the first attempt inside search_duckduckgo
+                )
+
+                if not step_search_results:
+                    search_step_errors += 1
+                    yield from send_progress(f"  -> Search failed or returned no results for keywords: {keywords}")
+
                 all_urls_from_search.extend(step_search_results)
-                time.sleep(0.1) # Small delay between searches
 
-            yield from send_progress(f"Search phase completed in {time.time() - start_search_time:.2f}s. Found {len(all_urls_from_search)} total URLs initially.")
+                # --- CHANGED: Add delay *between* different keyword searches ---
+                if i < len(research_plan) - 1: # Don't sleep after the last search
+                    # print(f"  -> Delaying {DDGS_SEARCH_DELAY_SECONDS}s before next search...") # Debug
+                    time.sleep(DDGS_SEARCH_DELAY_SECONDS)
 
-            unique_urls = list(dict.fromkeys(all_urls_from_search))
+
+            yield from send_progress(f"Search phase completed in {time.time() - start_search_time:.2f}s.")
+            yield from send_progress(f"Found {len(all_urls_from_search)} total URL results initially ({search_step_errors} search steps had issues).")
+
+            # --- Filtering (Remains the same logic) ---
+            unique_urls = list(dict.fromkeys(filter(None, all_urls_from_search))) # Filter None before unique
             yield from send_progress(f"Processing {len(unique_urls)} unique URLs...")
 
             for url in unique_urls:
-                 if not url: continue
                  if urls_collected_count >= MAX_TOTAL_URLS_TO_SCRAPE:
                       yield from send_progress(f"  -> Reached URL collection limit ({MAX_TOTAL_URLS_TO_SCRAPE}).")
                       break
-                 if url in all_found_urls_set: continue
+                 if url in all_found_urls_set: continue # Should be redundant with unique_urls but safe
 
-                 # Basic URL filtering
-                 is_file = url.lower().split('?')[0].split('#')[0].endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx', '.webp', '.svg', '.xml', '.css', '.js', '.jpeg', '.doc', '.xls', '.ppt', '.txt'))
+                 is_file = url.lower().split('?')[0].split('#')[0].endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx', '.webp', '.svg', '.xml', '.css', '.js', '.jpeg', '.doc', '.xls', '.ppt', '.txt', '.exe', '.dmg', '.iso', '.rar'))
                  is_mailto = url.lower().startswith('mailto:')
                  is_javascript = url.lower().startswith('javascript:')
                  is_ftp = url.lower().startswith('ftp:')
                  is_tel = url.lower().startswith('tel:')
                  is_valid_http = url.startswith(('http://', 'https://'))
-                 # Add common non-content domains if needed (e.g., youtube, facebook, twitter)
+                 # Add common non-content domains if needed
                  # is_social_media = any(domain in url for domain in ['youtube.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com'])
 
                  if is_valid_http and not is_file and not is_mailto and not is_javascript and not is_ftp and not is_tel: # and not is_social_media:
                       urls_to_scrape_list.append(url)
-                      all_found_urls_set.add(url)
+                      all_found_urls_set.add(url) # Track added URLs
                       urls_collected_count += 1
-                 #else:
-                      # yield from send_progress(f"  -> Skipping filtered URL: {url[:70]}...") # Can be verbose
-                 all_found_urls_set.add(url) # Track all encountered URLs
+                 # else: # Log skipped URLs if needed (can be verbose)
+                 #    reason = "file" if is_file else "mailto" if is_mailto else "javascript" if is_javascript else "ftp" if is_ftp else "tel" if is_tel else "invalid http" if not is_valid_http else "other"
+                 #    yield from send_progress(f"  -> Skipping filtered URL ({reason}): {url[:70]}...")
 
             yield from send_progress(f"Selected {len(urls_to_scrape_list)} valid, unique URLs for scraping (limit: {MAX_TOTAL_URLS_TO_SCRAPE}).")
 
             if not urls_to_scrape_list:
-                 yield from send_error_event("No suitable URLs found to scrape after searching and filtering.")
+                 yield from send_error_event("No suitable URLs found to scrape after searching and filtering. Check search results or filtering logic.")
                  return
 
             # === Step 2b: Scrape URLs Concurrently ===
-            yield from send_progress(f"Starting concurrent scraping of {len(urls_to_scrape_list)} URLs using up to {MAX_WORKERS} workers...")
+            yield from send_progress(f"Starting concurrent scraping of {len(urls_to_scrape_list)} URLs (Max workers: {MAX_WORKERS})...")
             start_scrape_time = time.time()
             total_scraped_successfully = 0
             processed_scrape_count = 0
-            scraped_sources_list = [] # Re-initialize here
+            scraped_sources_list = [] # Re-initialize
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 future_to_url = {executor.submit(scrape_url, url): url for url in urls_to_scrape_list}
@@ -636,65 +723,76 @@ def stream():
                     url = future_to_url[future]
                     processed_scrape_count += 1
                     try:
-                        result_dict = future.result()
+                        result_dict = future.result() # result() will raise exceptions from scrape_url
                         if result_dict and isinstance(result_dict, dict) and result_dict.get('content'):
                             scraped_sources_list.append(result_dict)
                             total_scraped_successfully += 1
-                        # else: # Don't log every failed scrape, scrape_url logs errors
-                        #     yield from send_progress(f"    -> Failed or empty scrape for: {url[:60]}...")
+                        # else: # Failure/empty scrape already logged inside scrape_url
+                        #    pass
                     except Exception as exc:
-                        yield from send_progress(f"    -> Thread Error processing scrape result for {url[:60]}...: {exc}")
-                    finally:
-                         # Update progress less frequently to avoid flooding
-                         if processed_scrape_count % 10 == 0 or processed_scrape_count == len(urls_to_scrape_list):
-                              progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_list)
-                              yield from send_progress(f"  -> Scraping progress: {processed_scrape_count}/{len(urls_to_scrape_list)} ({progress_perc}% complete). Success: {total_scraped_successfully}")
+                        # This catches errors *if* scrape_url itself failed unexpectedly
+                        # It shouldn't happen often as scrape_url handles its errors
+                        yield from send_progress(f"    -> Unexpected Error processing scrape result for {url[:60]}...: {exc}")
+
+                    # Update progress less frequently
+                    update_interval = max(1, len(urls_to_scrape_list) // 10) # Update ~10 times
+                    if processed_scrape_count % update_interval == 0 or processed_scrape_count == len(urls_to_scrape_list):
+                          progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_list)
+                          yield from send_progress(f"  -> Scraping progress: {processed_scrape_count}/{len(urls_to_scrape_list)} ({progress_perc}%). Success: {total_scraped_successfully}")
+
 
             duration = time.time() - start_scrape_time
             yield from send_progress(f"Finished scraping. Successfully scraped {total_scraped_successfully}/{len(urls_to_scrape_list)} URLs in {duration:.2f} seconds.")
+            if total_scraped_successfully < len(urls_to_scrape_list):
+                 yield from send_progress(f"  -> Note: {len(urls_to_scrape_list) - total_scraped_successfully} URLs failed to scrape (check logs for HTTP errors like 403, timeouts, etc.).")
+
 
             if not scraped_sources_list:
-                yield from send_error_event("Failed to scrape any content successfully from the selected URLs.")
+                yield from send_error_event("Failed to scrape any content successfully. Check website accessibility or scraper logic.")
                 return
 
-            # Re-order scraped list to match the original scrape order (optional, but can be helpful)
+            # Re-order scraped list (optional)
             scraped_url_map = {item['url']: item for item in scraped_sources_list}
             ordered_scraped_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
-            scraped_sources_list = ordered_scraped_list # Use the ordered list
+            scraped_sources_list = ordered_scraped_list
 
             # === Bibliography Map ===
             url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_sources_list)
 
             # === Step 3: Synthesize with Citations (Streaming) ===
-            yield from send_progress(f"Synthesizing relevant information using {GOOGLE_MODEL_NAME} (AI Generating...)")
+            yield from send_progress(f"Synthesizing relevant information using {GOOGLE_MODEL_NAME}...")
             yield from send_event({'type': 'stream_start', 'target': 'synthesis'})
 
-            # Prepare context for LLM
-            # Ensure context fits within model limits. Truncate content if necessary.
-            # Note: Gemini 1.5 Pro has a large context window, but cost and processing time increase.
-            MAX_CONTEXT_CHARS = 900000 # Example limit (adjust based on model and expected input size)
+            # --- Context Preparation & Truncation (Improved) ---
+            # Estimate token count roughly (1 char ~ 0.25 tokens, plus overhead)
+            # Gemini 1.5 Flash has 1M token context, Pro has 1M (up to 2M)
+            # Let's aim well below the limit to be safe and manage cost/time
+            # Target max tokens for context (adjust based on model and budget)
+            TARGET_MAX_CONTEXT_TOKENS = 750000
+            CHARS_PER_TOKEN_ESTIMATE = 4 # Conservative estimate
+            MAX_CONTEXT_CHARS = int(TARGET_MAX_CONTEXT_TOKENS * CHARS_PER_TOKEN_ESTIMATE * 0.9) # Use 90%
+
             context_for_llm_structured = []
             current_chars = 0
             sources_included_count = 0
             original_source_count = len(scraped_sources_list)
 
             for source in scraped_sources_list:
-                source_len = len(source.get('content', '')) + len(source.get('url', '')) + 50 # Estimate JSON overhead
-                if current_chars + source_len <= MAX_CONTEXT_CHARS:
-                    context_for_llm_structured.append(source)
-                    current_chars += source_len
-                    sources_included_count += 1
-                else:
-                    yield from send_progress(f"  -> Warning: Context limit ({MAX_CONTEXT_CHARS} chars) reached. Truncating sources for synthesis. Included {sources_included_count}/{original_source_count}.")
-                    break # Stop adding sources
+                 # Estimate size: URL length + content length + JSON overhead (~50 chars)
+                 source_len = len(source.get('url', '')) + len(source.get('content', '')) + 50
+                 if current_chars + source_len <= MAX_CONTEXT_CHARS:
+                     context_for_llm_structured.append(source)
+                     current_chars += source_len
+                     sources_included_count += 1
+                 else:
+                     yield from send_progress(f"  -> Warning: Estimated context limit (~{MAX_CONTEXT_CHARS // 1000}k chars) reached. Using first {sources_included_count}/{original_source_count} sources for synthesis.")
+                     break # Stop adding sources
 
             estimated_chars = sum(len(item.get('content', '')) for item in context_for_llm_structured)
-            yield from send_progress(f"  -> Synthesis context size: ~{estimated_chars // 1000}k chars from {len(context_for_llm_structured)} sources.")
+            estimated_tokens = estimated_chars / CHARS_PER_TOKEN_ESTIMATE
+            yield from send_progress(f"  -> Synthesis using {len(context_for_llm_structured)} sources (~{estimated_chars // 1000}k chars / ~{estimated_tokens // 1000}k tokens).")
 
-            if estimated_chars > 500000 and GOOGLE_MODEL_NAME == "gemini-pro": # gemini-pro has smaller context
-                 yield from send_progress("  -> Warning: Context size might be large for gemini-pro, consider gemini-1.5-pro if available.")
-
-
+            # --- Synthesis Prompt (Remains the same) ---
             synthesis_prompt = f"""
             Analyze the following scraped web content related to the topic "{topic}", following the research plan provided.
             Your goal is to synthesize the key information relevant to each step of the plan, citing sources accurately using ONLY the provided URLs.
@@ -722,9 +820,8 @@ def stream():
             """
             accumulated_synthesis = ""
             synthesis_stream_error = None
-            synthesis_finish_reason = None
+            # --- Synthesis Stream Processing ---
             try:
-                # Use the refactored stream_gemini
                 stream_generator = stream_gemini(synthesis_prompt)
                 for result in stream_generator:
                     if result['type'] == 'chunk':
@@ -732,21 +829,23 @@ def stream():
                         accumulated_synthesis += result['content']
                     elif result['type'] == 'stream_error':
                         synthesis_stream_error = result['message']
+                        # Send error to client, but maybe don't terminate immediately?
+                        # Let's terminate for now on critical errors like API key/quota
                         yield from send_error_event(f"LLM stream error during synthesis ({GOOGLE_MODEL_NAME}): {synthesis_stream_error}")
-                        # Decide whether to terminate based on error type (e.g., quota vs temporary issue)
-                        return # Terminate for now on any stream error
+                        if "API key" in synthesis_stream_error or "quota" in synthesis_stream_error.lower():
+                            return # Terminate on critical auth/quota issues
+                        # Otherwise, maybe log and try to continue? For now, terminate.
+                        return
                     elif result['type'] == 'stream_warning':
                          yield from send_progress(f"LLM Stream Warning (Synthesis): {result['message']}")
-                         # Continue processing despite warnings like safety blocks, but be aware output might be affected
+                         # Continue processing despite warnings
                     elif result['type'] == 'stream_end':
-                         synthesis_finish_reason = result.get('finish_reason')
-                         # Google API stream_end might not have detailed finish reason easily available here
-                         # Log what we have
                          yield from send_progress(f"Synthesis stream finished.")
-                         break # Exit loop on stream end
+                         break # Exit loop
 
-                if synthesis_stream_error:
-                     return # Terminate if an error occurred
+                if synthesis_stream_error: # Check again if loop exited due to non-critical error handled above
+                     print("Terminating after non-critical stream error during synthesis.")
+                     return
 
             except Exception as e:
                  yield from send_error_event(f"Fatal error processing LLM synthesis stream: {e}")
@@ -756,29 +855,34 @@ def stream():
 
             yield from send_progress(f"Synthesis generation completed.")
             if not accumulated_synthesis.strip():
-                 yield from send_error_event("Synthesis resulted in empty content. Check LLM response or source relevance.")
+                 yield from send_error_event("Synthesis resulted in empty content. Check LLM response, source relevance, or potential safety filtering.")
+                 # Optionally dump the synthesis prompt for debugging
+                 # print("--- Failed Synthesis Prompt ---")
+                 # print(synthesis_prompt[:5000] + "...")
+                 # print("--- End Failed Synthesis Prompt ---")
                  return
 
             # === Step 4: Generate Final Report (Streaming) ===
-            yield from send_progress(f"Generating final report using {GOOGLE_MODEL_NAME} (AI Generating...)")
+            yield from send_progress(f"Generating final report using {GOOGLE_MODEL_NAME}...")
             yield from send_event({'type': 'stream_start', 'target': 'report'})
 
-            # Ensure the synthesis + bibliography map doesn't exceed limits for the report prompt
-            # (Less likely to be an issue than the source content itself, but good practice)
-            MAX_REPORT_PROMPT_CHARS = 950000 # Slightly less than synthesis to be safe
-
+            # --- Report Prompt Preparation (Truncation if needed) ---
+            # Estimate size for report prompt (less likely to hit limit here)
             report_components_size = len(topic) + len(json.dumps(research_plan)) + len(accumulated_synthesis) + len(bibliography_prompt_list)
+            report_estimated_tokens = report_components_size / CHARS_PER_TOKEN_ESTIMATE
 
-            if report_components_size > MAX_REPORT_PROMPT_CHARS:
-                 yield from send_progress(f"  -> Warning: Combined inputs for final report prompt potentially large (~{report_components_size // 1000}k chars). Synthesis might be truncated in prompt.")
-                 # Simple truncation strategy: Prioritize keeping the plan and bibliography map intact
-                 available_chars_for_synthesis = MAX_REPORT_PROMPT_CHARS - (len(topic) + len(json.dumps(research_plan)) + len(bibliography_prompt_list) + 1000) # Reserve buffer
+            if report_estimated_tokens > TARGET_MAX_CONTEXT_TOKENS * 0.95: # Check if close to limit
+                 yield from send_progress(f"  -> Warning: Inputs for final report prompt large (~{report_estimated_tokens // 1000}k est. tokens). Synthesis might be truncated in prompt.")
+                 # Truncate synthesis if needed (same logic as before)
+                 available_chars_for_synthesis = MAX_CONTEXT_CHARS - (len(topic) + len(json.dumps(research_plan)) + len(bibliography_prompt_list) + 2000) # Reserve buffer
                  if available_chars_for_synthesis < 0: available_chars_for_synthesis = 0
-                 truncated_synthesis = accumulated_synthesis[:available_chars_for_synthesis] + "\n... [Synthesis truncated due to length limit]"
+                 truncated_synthesis = accumulated_synthesis[:available_chars_for_synthesis] + "\n\n... [Synthesis truncated in report prompt due to length limit]"
+                 yield from send_progress(f"  -> Truncated synthesis to ~{available_chars_for_synthesis // 1000}k chars for report prompt.")
             else:
                  truncated_synthesis = accumulated_synthesis
 
 
+            # --- Report Prompt (Remains the same structure) ---
             report_prompt = f"""
             Create a comprehensive Markdown research report on the topic: "{topic}".
 
@@ -799,26 +903,24 @@ def stream():
                ```
 
             Instructions:
-            1. Write a final research report in well-structured Markdown format.
+            1. Write a final research report in well-structured Markdown format. Use clear headings, paragraphs, and lists where appropriate.
             2. The report MUST include the following sections using Markdown headings:
                 - `# Research Report: {topic}` (Main Title)
                 - `## Introduction`: Briefly introduce the topic "{topic}", state the purpose of the report, and outline the research scope based on the plan's steps (list or describe them).
                 - `## Findings`: Organize the main body strictly according to the {len(research_plan)} research plan steps. For each step:
                     - Use a subheading (e.g., `### Step X: <Step Description from Plan>`).
-                    - Integrate the relevant "Synthesized Information" for that step provided above.
+                    - Integrate the relevant "Synthesized Information" for that step provided above. Ensure smooth flow and readability.
                     - **CRITICALLY IMPORTANT AND MANDATORY: Replace EVERY inline URL citation `[Source URL: <full_url_here>]` from the "Synthesized Information" with its corresponding Markdown footnote marker `[^N]`. Use the provided "Bibliography Map" to find the correct number N for the EXACT URL. Ensure the mapping is precise.**
-                    - If a URL citation appears in the synthesis that is *not* present in the Bibliography Map (e.g., due to context truncation or hallucination), OMIT that specific citation marker. Do not invent footnote numbers or include broken references. Rephrase slightly if needed.
-                    - Ensure smooth flow and readability within each step's section.
-                - `## Conclusion`: Summarize the key findings derived from the synthesis across the most important plan steps. Briefly mention any significant limitations encountered (e.g., steps where information was lacking in sources, potential biases). Suggest potential areas for further research if applicable.
+                    - If a URL citation appears in the synthesis that is *not* present in the Bibliography Map (e.g., due to context truncation, LLM hallucination, or if the source wasn't included in the synthesis context), OMIT that specific citation marker entirely. Do not invent footnote numbers or include broken references `[^?]`. Rephrase the sentence slightly if removing the citation makes it awkward.
+                - `## Conclusion`: Summarize the key findings derived from the synthesis across the most important plan steps. Briefly mention any significant limitations encountered (e.g., steps where information was lacking in sources, potential biases identified, scraping difficulties, number of sources analyzed). Suggest potential areas for further research if applicable.
             3. Append a `## Bibliography` section at the very end of the report.
-            4. In the Bibliography section, list all the sources from the "Bibliography Map" in numerical order (1, 2, 3...). Use the standard Markdown footnote definition format for each entry: `[^N]: <full_url_here>`. Make the URL clickable (Markdown automatically does this if format is correct).
-            5. Ensure the final output is **only** the complete Markdown report, adhering strictly to the structure, formatting, citation replacement, and bibliography instructions. Do not include any commentary, introductory text about the process, apologies, or explanations outside the report content itself.
+            4. In the Bibliography section, list all the sources from the "Bibliography Map" in numerical order (1, 2, 3...). Use the standard Markdown footnote definition format for each entry: `[^N]: <full_url_here>`. The URL should be the plain URL (Markdown parsers typically make these clickable).
+            5. Ensure the final output is **only** the complete Markdown report, adhering strictly to the structure, formatting, citation replacement, and bibliography instructions. Do not include any commentary about the process, apologies, or explanations outside the report content itself.
             """
             final_report_markdown = "" # Reset before accumulating
             report_stream_error = None
-            report_finish_reason = None
+            # --- Report Stream Processing ---
             try:
-                # Use the refactored stream_gemini
                 stream_generator = stream_gemini(report_prompt)
                 for result in stream_generator:
                     if result['type'] == 'chunk':
@@ -827,17 +929,20 @@ def stream():
                     elif result['type'] == 'stream_error':
                         report_stream_error = result['message']
                         yield from send_error_event(f"LLM stream error during report generation ({GOOGLE_MODEL_NAME}): {report_stream_error}")
-                        return # Terminate on error
+                        if "API key" in report_stream_error or "quota" in report_stream_error.lower():
+                             return # Terminate
+                        # Otherwise, terminate for now
+                        return
                     elif result['type'] == 'stream_warning':
                          yield from send_progress(f"LLM Stream Warning (Report): {result['message']}")
-                         # Continue processing
+                         # Continue
                     elif result['type'] == 'stream_end':
-                         report_finish_reason = result.get('finish_reason')
                          yield from send_progress(f"Report stream finished.")
                          break # Exit loop
 
                 if report_stream_error:
-                     return # Terminate if error occurred
+                    print("Terminating after non-critical stream error during report generation.")
+                    return
 
             except Exception as e:
                  yield from send_error_event(f"Fatal error processing LLM report stream: {e}")
@@ -853,24 +958,38 @@ def stream():
             # --- Final Processing and Completion ---
             yield from send_progress("Processing final report for display...")
 
-            # Convert final accumulated report Markdown to HTML
+            # Convert final report Markdown to HTML
             try:
-                # Ensure footnotes extension is enabled
-                report_html = md_lib.markdown(final_report_markdown, extensions=['footnotes', 'fenced_code', 'tables', 'nl2br', 'attr_list'])
+                # Ensure footnotes extension is enabled, plus others for common Markdown features
+                report_html = md_lib.markdown(
+                    final_report_markdown,
+                    extensions=['footnotes', 'fenced_code', 'tables', 'nl2br', 'attr_list', 'md_in_html']
+                )
             except Exception as md_err:
                  yield from send_error_event(f"Failed to convert final Markdown report to HTML: {md_err}")
                  from html import escape
-                 report_html = f"<h3>Markdown Conversion Error</h3><p>Could not render report as HTML. Raw Markdown below:</p><pre>{escape(final_report_markdown)}</pre>"
+                 # Provide raw markdown in a <pre> tag as fallback
+                 report_html = f"<h3>Markdown Conversion Error</h3><p>Could not render report as HTML using 'markdown' library. Error: {escape(str(md_err))}. Raw Markdown content below:</p><hr><pre style='white-space: pre-wrap; word-wrap: break-word;'>{escape(final_report_markdown)}</pre>"
 
 
             # Prepare final data payload
-            # Limit preview size
             preview_limit = 3000
-            raw_data_preview = json.dumps(scraped_sources_list[:3], indent=2, ensure_ascii=False) # Show first 3 sources
-            if len(raw_data_preview) > preview_limit:
-                 raw_data_preview = raw_data_preview[:preview_limit] + f"\n... (Preview truncated, {len(scraped_sources_list)} total sources scraped)"
+            raw_data_preview_list = []
+            current_preview_len = 0
+            # Show preview of first few *successfully scraped* sources
+            for src in scraped_sources_list:
+                src_dump = json.dumps(src, indent=2, ensure_ascii=False)
+                if current_preview_len + len(src_dump) < preview_limit:
+                    raw_data_preview_list.append(src_dump)
+                    current_preview_len += len(src_dump)
+                else:
+                    break # Stop adding previews if limit reached
+            raw_data_preview = "[\n" + ",\n".join(raw_data_preview_list) + "\n]"
+            if len(scraped_sources_list) > len(raw_data_preview_list):
+                 raw_data_preview += f"\n... (Preview includes {len(raw_data_preview_list)}/{len(scraped_sources_list)} successfully scraped sources)"
             elif not scraped_sources_list:
-                 raw_data_preview = "None"
+                 raw_data_preview = "None (No sources scraped successfully)"
+
 
             final_data = {
                 'type': 'complete',
@@ -888,11 +1007,9 @@ def stream():
             import traceback
             traceback.print_exc()
             error_msg = f"Unexpected server error during research process: {type(e).__name__} - {e}"
-            # Ensure error is sent to client even if it happens outside main steps
             yield from send_error_event(error_msg)
         finally:
-            # Signal the end of the stream to the client, even if errors occurred
-            # This helps the client know the connection should close.
+             # Signal the end of the stream regardless of success/failure
              yield from send_event({'type': 'stream_terminated'})
 
 
@@ -906,16 +1023,16 @@ def stream():
     return Response(stream_with_context(generate_updates()), headers=headers)
 
 
-# --- DOCX Download Route - No changes needed ---
+# --- DOCX Download Route - Now checks PANDOC_AVAILABLE flag ---
 @app.route('/download_docx', methods=['POST'])
 def download_docx():
     """Converts the received Markdown report to DOCX and sends it as a download."""
     if not PANDOC_AVAILABLE:
-        # Return a JSON error response for the frontend to handle
-        return jsonify({"success": False, "message": "DOCX download is disabled because Pandoc is not correctly installed or configured."}), 400
+        # Return JSON error if Pandoc wasn't found at startup
+        return jsonify({"success": False, "message": "DOCX download is disabled: Pandoc executable not found or pypandoc setup issue. Install 'pypandoc-binary'."}), 400
 
     markdown_content = request.form.get('markdown_report')
-    topic = request.form.get('topic', 'Research Report') # Get topic for filename
+    topic = request.form.get('topic', 'Research_Report') # Get topic for filename
 
     if not markdown_content:
         return jsonify({"success": False, "message": "Error: No Markdown content received for conversion."}), 400
@@ -923,6 +1040,7 @@ def download_docx():
     try:
         # Use pypandoc to convert Markdown text to DOCX bytes
         # Ensure input encoding is handled correctly, default is usually UTF-8
+        # If using pypandoc-binary, it should find the bundled pandoc
         docx_bytes = pypandoc.convert_text(
             markdown_content,
             'docx',
@@ -931,47 +1049,41 @@ def download_docx():
             # extra_args=['--reference-doc=my_template.docx'] # Optional: specify a template
         )
 
-        # Create a BytesIO buffer to hold the DOCX data
         buffer = BytesIO(docx_bytes)
         buffer.seek(0)
 
         # Sanitize topic for filename
         safe_filename_topic = re.sub(r'[^\w\s-]', '', topic).strip()
         safe_filename_topic = re.sub(r'[-\s]+', '_', safe_filename_topic)
-        # Truncate filename base if too long (OS limits vary, ~200 chars is safe)
         filename_base = f"{safe_filename_topic}_Research_Report"
-        filename = f"{filename_base[:200]}.docx"
+        filename = f"{filename_base[:200]}.docx" # Limit filename length
 
-        # Send the file
         return send_file(
             buffer,
             as_attachment=True,
-            download_name=filename, # Use download_name (or attachment_filename for older Flask)
+            download_name=filename,
             mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         )
 
-    except FileNotFoundError as e:
-         # Check if the error message specifically mentions 'pandoc'
-         if 'pandoc' in str(e).lower():
-             print("ERROR: Pandoc executable not found during conversion attempt.")
-             msg = "Error: Pandoc executable not found. Please ensure it's installed and in the system PATH."
-             return jsonify({"success": False, "message": msg}), 500
-         else:
-             # Handle other potential FileNotFoundError cases if necessary
-             print(f"Error during DOCX conversion (FileNotFound): {e}")
-             return jsonify({"success": False, "message": f"An unexpected file error occurred: {e}"}), 500
     except Exception as e:
-        # Catch errors during pypandoc conversion itself
+        # Catch potential errors during conversion (even if PANDOC_AVAILABLE was true initially)
         print(f"Error converting Markdown to DOCX using pypandoc: {e}")
-        # Include more specific error info if pypandoc provides it
-        return jsonify({"success": False, "message": f"An error occurred during DOCX conversion: {e}"}), 500
+        # Check if it's specifically the "No pandoc was found" error again
+        if "No pandoc was found" in str(e):
+            msg = "Error during conversion: Pandoc executable could not be located by pypandoc at runtime. Ensure 'pypandoc-binary' is installed or pandoc is correctly in PATH."
+        else:
+            msg = f"An error occurred during DOCX conversion: {e}"
+        # Log the error and return JSON
+        return jsonify({"success": False, "message": msg}), 500
 
 
 # --- Run the App ---
 if __name__ == '__main__':
-    # Ensure libraries are installed: pip install Flask python-dotenv google-generativeai duckduckgo-search beautifulsoup4 requests lxml Markdown pypandoc flask[async]
-    # Ensure Pandoc executable is installed and in PATH: https://pandoc.org/installing.html
+    # --- CHANGED: Updated installation comment ---
+    # Ensure libraries are installed: pip install Flask python-dotenv google-generativeai duckduckgo-search beautifulsoup4 requests lxml Markdown pypandoc-binary flask[async]
     # Set GOOGLE_API_KEY in your .env file
     print(f"Using Google Model: {GOOGLE_MODEL_NAME}")
-    print(f"Pandoc/DOCX available: {PANDOC_AVAILABLE}")
-    app.run(debug=True, host='127.0.0.1', port=5001, threaded=True) # threaded=True is important for handling concurrent requests/SSE
+    print(f"Pandoc/DOCX available check at startup: {PANDOC_AVAILABLE}")
+    # Recommended: Use a production WSGI server like gunicorn or uwsgi for deployment
+    # Example: gunicorn --workers 4 --threads 2 --bind 0.0.0.0:5001 your_script_name:app
+    app.run(debug=True, host='127.0.0.1', port=5001, threaded=True)
