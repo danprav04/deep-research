@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light"> <!-- Pico theme -->
+<html lang="en" data-theme="light"> <!-- Kept data-theme="light" -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,7 +13,7 @@
         #progress-log-container {
             max-height: 250px;
             overflow-y: auto;
-            background-color: var(--pico-card-background-color);
+            background-color: var(--pico-card-background-color); /* Consistent card background */
             border: 1px solid var(--pico-card-border-color);
             padding: 1rem;
             border-radius: var(--pico-border-radius);
@@ -29,7 +29,7 @@
             margin-top: 1rem;
             margin-bottom: 1.5rem;
             border-radius: var(--pico-border-radius);
-            background-color: var(--pico-contrast-hover);
+            background-color: var(--pico-contrast-hover); /* Subtle background for streams */
             display: none; /* Hidden initially */
             white-space: pre-wrap; /* Preserve whitespace */
             word-wrap: break-word;
@@ -38,7 +38,12 @@
         }
         .stream-container h4 { margin-top: 0; color: var(--pico-primary); }
         #final-report-container { margin-top: 2rem; }
-        #final-report-content { background-color: #fff; padding: 1.5rem; border-radius: var(--pico-border-radius); border: 1px solid var(--pico-card-border-color); }
+        #final-report-content {
+            background-color: var(--pico-card-background-color); /* Changed from #fff for consistency */
+            padding: 1.5rem;
+            border-radius: var(--pico-border-radius);
+            border: 1px solid var(--pico-card-border-color); /* Consistent card border */
+         }
         #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; }
         #final-report-content h1:first-child, #final-report-content h2:first-child { margin-top: 0; }
         #final-report-content sup a { text-decoration: none; } /* Footnote styling */
@@ -106,6 +111,7 @@
     </main>
 
     <script>
+        // Javascript remains the same
         const progressLog = document.getElementById('progress-log');
         const progressArea = document.getElementById('progress-area');
         const finalReportContainer = document.getElementById('final-report-container');
