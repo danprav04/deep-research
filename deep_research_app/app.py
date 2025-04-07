@@ -5,24 +5,37 @@ import time
 import json
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context
+from flask import Flask, render_template, request, redirect, url_for, jsonify, Response, stream_with_context, send_file
 from openai import OpenAI
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS
 # Use the Markdown library for better footnote support
 import markdown as md_lib
-from urllib.parse import quote
+from urllib.parse import quote, unquote # Add unquote
 import concurrent.futures # Import the concurrent futures library
+from io import BytesIO # Needed for sending file data
+
+# --- NEW: Import pypandoc ---
+try:
+    import pypandoc
+    PANDOC_AVAILABLE = True
+except ImportError:
+    print("WARNING: pypandoc library not found. DOCX download will be disabled. Install with 'pip install pypandoc'")
+    PANDOC_AVAILABLE = False
+except OSError:
+    print("WARNING: Pandoc executable not found in system PATH. DOCX download will be disabled. Ensure Pandoc is installed: https://pandoc.org/installing.html")
+    PANDOC_AVAILABLE = False
+
 
 # --- Configuration ---
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL_NAME = os.getenv("OPENROUTER_MODEL_NAME", "google/gemini-pro-1.5") # Consider models with larger context if needed for many steps
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
-MAX_SEARCH_RESULTS_PER_STEP = 10 # Reduced slightly to manage total URLs better with more steps
-MAX_TOTAL_URLS_TO_SCRAPE = 100  # Increased slightly, balance with performance
-MAX_WORKERS = 10 # Can potentially increase slightly
-REQUEST_TIMEOUT = 12 # Slightly increased timeout
+MAX_SEARCH_RESULTS_PER_STEP = 10
+MAX_TOTAL_URLS_TO_SCRAPE = 100
+MAX_WORKERS = 10
+REQUEST_TIMEOUT = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36" # Updated UA string
 PICO_CSS_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"
 
@@ -258,6 +271,7 @@ def parse_research_plan(llm_response):
     print("All parsing methods failed to extract a valid research plan.")
     return [{"step_description": "Failed to parse plan structure from LLM response", "keywords": []}]
 
+
 # search_duckduckgo - No changes needed
 def search_duckduckgo(keywords, max_results=MAX_SEARCH_RESULTS_PER_STEP):
     """Performs a search on DuckDuckGo using the library."""
@@ -278,8 +292,7 @@ def search_duckduckgo(keywords, max_results=MAX_SEARCH_RESULTS_PER_STEP):
         # Optionally retry or just return empty list
     return urls
 
-
-# scrape_url - Minor logging improvements
+# scrape_url - No changes needed
 def scrape_url(url):
     """
     Scrapes text content from a given URL.
@@ -374,7 +387,6 @@ def scrape_url(url):
 
     return None
 
-
 # generate_bibliography_map - No changes needed
 def generate_bibliography_map(scraped_sources_list):
     """Creates a map of {url: index} and a numbered list for prompts."""
@@ -397,13 +409,15 @@ def research_start():
         return redirect(url_for('index'))
     # URL-encode the topic for safe inclusion in the results page URL
     encoded_topic = quote(topic)
+    # *** NEW: Pass unencoded topic separately for display ***
     return render_template('results.html', topic=topic, encoded_topic=encoded_topic, pico_css=PICO_CSS_CDN)
 
 @app.route('/stream')
 def stream():
     """The main SSE route that performs research and streams progress."""
     # Topic needs to be retrieved from query parameters now
-    topic = request.args.get('topic', 'Default Topic')
+    encoded_topic = request.args.get('topic', '') # Get encoded topic
+    topic = unquote(encoded_topic) # Decode topic for internal use
     if not topic:
         topic = "Default Topic" # Fallback if somehow empty
 
@@ -414,26 +428,23 @@ def stream():
         urls_to_scrape_list = [] # List of unique URLs to actually scrape
         research_plan = []
         accumulated_synthesis = ""
-        accumulated_report = ""
+        final_report_markdown = "" # Store final markdown
+        url_to_index_map = {} # Keep track of bibliography mapping
         start_time_total = time.time() # Track total time
 
         def send_event(data):
             """Helper to format and yield SSE events."""
-            # Ensure data is serializable before sending
             try:
                 payload = json.dumps(data)
                 yield f"data: {payload}\n\n"
             except TypeError as e:
                 print(f"Error serializing data for SSE: {e}. Data: {data}")
-                # Send an error event instead or skip
                 error_payload = json.dumps({'type': 'error', 'message': f"Internal server error: Could not serialize data - {e}"})
                 yield f"data: {error_payload}\n\n"
-
 
         def send_progress(message):
             yield from send_event({'type': 'progress', 'message': message})
 
-        # **MODIFIED**: send_error no longer raises StopIteration
         def send_error_event(message):
             """Sends an error event via SSE."""
             print(f"ERROR: {message}")
@@ -442,7 +453,6 @@ def stream():
         try:
             # === Step 1: Generate Research Plan ===
             yield from send_progress(f"Generating research plan for: '{topic}'...")
-            # ***MODIFIED*** Ask for more steps
             plan_prompt = f"""
             Create a detailed, step-by-step research plan with 10-15 distinct steps for the topic: "{topic}"
             Each step should represent a specific question or area of inquiry related to the topic.
@@ -468,7 +478,6 @@ def stream():
 
             research_plan = parse_research_plan(plan_response)
 
-            # More robust check for failed plan parsing
             if not research_plan or not isinstance(research_plan, list) or \
                (len(research_plan) == 1 and research_plan[0]["step_description"].startswith("Failed")):
                  fail_reason = research_plan[0]["step_description"] if (research_plan and isinstance(research_plan, list) and research_plan[0].get("step_description")) else "Could not parse plan from LLM response."
@@ -477,24 +486,17 @@ def stream():
                  return # Terminate generator
 
             yield from send_progress(f"Generated {len(research_plan)} step plan:")
-            # Log only first few steps if plan is very long
             log_limit = 5
             for i, step in enumerate(research_plan[:log_limit]):
                  yield from send_progress(f"  {i+1}. {step['step_description']} (Keywords: {', '.join(step.get('keywords',[]))[:50]}...)")
             if len(research_plan) > log_limit:
                  yield from send_progress(f"  ... and {len(research_plan) - log_limit} more steps.")
 
-
             # === Step 2a: Search and Collect URLs ===
             yield from send_progress("Starting web search to collect URLs...")
             start_search_time = time.time()
             urls_collected_count = 0
-            search_tasks = []
-
-            # Create search tasks for all steps concurrently (optional, DDGS library might handle internally)
-            # This might not speed up significantly if DDGS library itself is blocking per search
-            # Let's stick to sequential search per step for simplicity and better logging
-            all_urls_from_search = [] # Keep track of all URLs found across steps
+            all_urls_from_search = []
             for i, step in enumerate(research_plan):
                 step_desc = step.get('step_description', f'Unnamed Step {i+1}')
                 keywords = step.get('keywords', [])
@@ -504,16 +506,13 @@ def stream():
                     yield from send_progress("  -> No keywords provided, skipping search for this step.")
                     continue
 
-                # Perform the search for this step
                 step_search_results = search_duckduckgo(keywords, MAX_SEARCH_RESULTS_PER_STEP)
-                all_urls_from_search.extend(step_search_results) # Add all found URLs
-                time.sleep(0.1) # Small delay between searches
-
+                all_urls_from_search.extend(step_search_results)
+                time.sleep(0.1)
 
             yield from send_progress(f"Search phase completed in {time.time() - start_search_time:.2f}s. Found {len(all_urls_from_search)} total URLs initially.")
 
-            # De-duplicate and filter URLs *after* collecting all search results
-            unique_urls = list(dict.fromkeys(all_urls_from_search)) # Preserve order while de-duplicating
+            unique_urls = list(dict.fromkeys(all_urls_from_search))
             yield from send_progress(f"Processing {len(unique_urls)} unique URLs...")
 
             for url in unique_urls:
@@ -521,9 +520,8 @@ def stream():
                  if urls_collected_count >= MAX_TOTAL_URLS_TO_SCRAPE:
                       yield from send_progress(f"  -> Reached URL collection limit ({MAX_TOTAL_URLS_TO_SCRAPE}).")
                       break
-                 if url in all_found_urls_set: continue # Should be redundant due to unique_urls, but safe
+                 if url in all_found_urls_set: continue
 
-                 # Basic filtering before adding to the scrape list
                  is_file = url.lower().split('?')[0].split('#')[0].endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx', '.webp', '.svg', '.xml', '.css', '.js'))
                  is_mailto = url.lower().startswith('mailto:')
                  is_javascript = url.lower().startswith('javascript:')
@@ -532,18 +530,16 @@ def stream():
 
                  if not is_file and not is_mailto and not is_javascript and not is_ftp and is_valid_http:
                       urls_to_scrape_list.append(url)
-                      all_found_urls_set.add(url) # Add to set to track uniqueness for scraping
+                      all_found_urls_set.add(url)
                       urls_collected_count += 1
-                      # yield from send_progress(f"    -> Added to scrape queue ({urls_collected_count}/{MAX_TOTAL_URLS_TO_SCRAPE}): {url[:70]}...") # Too verbose
-                 # else: # Don't log every skipped URL unless debugging
-                 #      # yield from send_progress(f"    -> Skipping (file/invalid/duplicate): {url[:70]}...")
-                 #      all_found_urls_set.add(url) # Add even non-scrapeable ones to avoid re-checking later if needed
+                 else:
+                    all_found_urls_set.add(url) # Add even non-scrapeable ones to track
 
             yield from send_progress(f"Selected {len(urls_to_scrape_list)} valid, unique URLs for scraping (limit: {MAX_TOTAL_URLS_TO_SCRAPE}).")
 
             if not urls_to_scrape_list:
                  yield from send_error_event("No suitable URLs found to scrape after searching and filtering.")
-                 return # Terminate generator
+                 return
 
             # === Step 2b: Scrape URLs Concurrently ===
             yield from send_progress(f"Starting concurrent scraping of {len(urls_to_scrape_list)} URLs using up to {MAX_WORKERS} workers...")
@@ -551,7 +547,6 @@ def stream():
             total_scraped_successfully = 0
             processed_scrape_count = 0
 
-            # Use ThreadPoolExecutor to scrape concurrently
             with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 future_to_url = {executor.submit(scrape_url, url): url for url in urls_to_scrape_list}
 
@@ -559,35 +554,29 @@ def stream():
                     url = future_to_url[future]
                     processed_scrape_count += 1
                     try:
-                        result_dict = future.result() # result() can raise exceptions from the thread
+                        result_dict = future.result()
                         if result_dict and isinstance(result_dict, dict) and result_dict.get('content'):
                             scraped_sources_list.append(result_dict)
                             total_scraped_successfully += 1
-                            # yield from send_progress(f"  Scraped {processed_scrape_count}/{len(urls_to_scrape_list)}: OK - {url[:60]}...") # Too verbose
-                        # else: Failure logged within scrape_url
-                            # yield from send_progress(f"  Scraped {processed_scrape_count}/{len(urls_to_scrape_list)}: Failed/Skipped - {url[:60]}...") # Too verbose
                     except Exception as exc:
-                        yield from send_progress(f"    -> Thread Error scraping {url[:60]}...: {exc}") # Log exceptions raised by future.result()
+                        yield from send_progress(f"    -> Thread Error scraping {url[:60]}...: {exc}")
                     finally:
-                         # Send progress less frequently to avoid overwhelming the UI
                          if processed_scrape_count % 5 == 0 or processed_scrape_count == len(urls_to_scrape_list):
                               progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_list)
                               yield from send_progress(f"  -> Scraping progress: {processed_scrape_count}/{len(urls_to_scrape_list)} ({progress_perc}% complete). Success: {total_scraped_successfully}")
-
 
             duration = time.time() - start_scrape_time
             yield from send_progress(f"Finished scraping. Successfully scraped {total_scraped_successfully}/{len(urls_to_scrape_list)} URLs in {duration:.2f} seconds.")
 
             if not scraped_sources_list:
                 yield from send_error_event("Failed to scrape any content successfully from the selected URLs.")
-                return # Terminate generator
+                return
 
-            # Sort scraped sources by original URL list order? Optional, but might be nice.
             scraped_url_map = {item['url']: item for item in scraped_sources_list}
             scraped_sources_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
 
-
             # === Bibliography Map ===
+            # *** MODIFIED: Store map for later use ***
             url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_sources_list)
 
             # === Step 3: Synthesize with Citations (Streaming) ===
@@ -598,11 +587,8 @@ def stream():
             estimated_chars = sum(len(item.get('content', '')) for item in context_for_llm_structured)
             yield from send_progress(f"  -> Synthesis context size: ~{estimated_chars // 1000}k chars from {len(scraped_sources_list)} sources.")
 
-            # Check estimated size vs potential model limits (very rough check)
-            # This depends heavily on the specific model and tokenization
-            if estimated_chars > 500000: # Example threshold (adjust based on model)
+            if estimated_chars > 500000:
                 yield from send_progress("  -> Warning: Context size is large, synthesis might be slow or hit limits.")
-
 
             synthesis_prompt = f"""
             Analyze the following scraped web content related to the topic "{topic}", following the research plan provided.
@@ -639,29 +625,26 @@ def stream():
                     elif result['type'] == 'stream_error':
                         synthesis_stream_error = result['message']
                         yield from send_error_event(f"LLM stream error during synthesis: {synthesis_stream_error}")
-                        return # Terminate generator
+                        return
                     elif result['type'] == 'stream_warning':
                          yield from send_progress(f"LLM Stream Warning (Synthesis): {result['message']}")
                     elif result['type'] == 'stream_end':
                          synthesis_finish_reason = result.get('finish_reason')
                          if synthesis_finish_reason == 'length':
                               yield from send_progress("Warning: Synthesis output might be truncated due to LLM length limits.")
-                         break # Exit loop cleanly on stream end
+                         break
 
-                # Check if loop exited due to error caught *inside* stream_gemini
                 if synthesis_stream_error:
-                     return # Already sent error and terminated
+                     return
 
             except Exception as e:
-                 # Catch errors in *processing* the stream generator itself
                  yield from send_error_event(f"Fatal error processing LLM synthesis stream: {e}")
-                 return # Terminate generator
+                 return
 
             yield from send_progress(f"Synthesis stream finished. (Finish reason: {synthesis_finish_reason or 'Normal'})")
-            # Check *after* stream completes if content is empty
             if not accumulated_synthesis.strip():
-                 yield from send_error_event("Synthesis resulted in empty content. The AI might not have found relevant information or failed to follow instructions.")
-                 return # Terminate generator
+                 yield from send_error_event("Synthesis resulted in empty content.")
+                 return
 
             # === Step 4: Generate Final Report (Streaming) ===
             yield from send_progress("Generating final report (AI Generating...)")
@@ -700,7 +683,7 @@ def stream():
             4. In the Bibliography section, list all the sources from the "Bibliography Map" in numerical order (1, 2, 3...). Use the standard Markdown footnote definition format for each entry: `[^N]: [URL](URL)`. Ensure the URL is clickable in the final rendered HTML.
             5. Ensure the final output is **only** the complete Markdown report, following the structure and formatting instructions precisely. Do not include any commentary, introductory text about the process, or explanations outside the report content itself.
             """
-            accumulated_report = ""
+            final_report_markdown = "" # Reset before accumulating
             report_stream_error = None
             report_finish_reason = None
             try:
@@ -708,70 +691,113 @@ def stream():
                 for result in stream_generator:
                     if result['type'] == 'chunk':
                         yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'report'})
-                        accumulated_report += result['content']
+                        final_report_markdown += result['content'] # *** MODIFIED: Store raw markdown ***
                     elif result['type'] == 'stream_error':
                         report_stream_error = result['message']
                         yield from send_error_event(f"LLM stream error during report generation: {report_stream_error}")
-                        return # Terminate generator
+                        return
                     elif result['type'] == 'stream_warning':
                          yield from send_progress(f"LLM Stream Warning (Report): {result['message']}")
                     elif result['type'] == 'stream_end':
                          report_finish_reason = result.get('finish_reason')
                          if report_finish_reason == 'length':
                               yield from send_progress("Warning: Final report output might be truncated due to LLM length limits.")
-                         break # Exit loop cleanly on stream end
+                         break
 
                 if report_stream_error:
-                     return # Already sent error and terminated
+                     return
 
             except Exception as e:
                  yield from send_error_event(f"Fatal error processing LLM report stream: {e}")
-                 return # Terminate generator
+                 return
 
             yield from send_progress(f"Report stream finished. (Finish reason: {report_finish_reason or 'Normal'})")
-            if not accumulated_report.strip():
+            if not final_report_markdown.strip():
                  yield from send_error_event("Report generation resulted in empty content.")
-                 return # Terminate generator
+                 return
 
             # Convert final accumulated report Markdown to HTML
             try:
-                # Enable necessary Markdown extensions
-                report_html = md_lib.markdown(accumulated_report, extensions=['footnotes', 'fenced_code', 'tables', 'nl2br', 'attr_list'])
+                report_html = md_lib.markdown(final_report_markdown, extensions=['footnotes', 'fenced_code', 'tables', 'nl2br', 'attr_list'])
             except Exception as md_err:
                  yield from send_error_event(f"Failed to convert final Markdown report to HTML: {md_err}")
-                 # Fallback: show raw markdown safely escaped in pre tags
                  from html import escape
-                 report_html = f"<pre>{escape(accumulated_report)}</pre>"
+                 report_html = f"<pre>{escape(final_report_markdown)}</pre>"
 
 
             # --- Send Final Completion Event ---
             final_data = {
                 'type': 'complete',
                 'report_html': report_html,
-                # Include a preview of the raw *successfully* scraped data
-                'raw_scraped_data_preview': json.dumps(scraped_sources_list[:2], indent=2, ensure_ascii=False)[:3000] + "..." if scraped_sources_list else "None"
+                # *** NEW: Send raw markdown for download feature ***
+                'report_markdown': final_report_markdown,
+                'raw_scraped_data_preview': json.dumps(scraped_sources_list[:2], indent=2, ensure_ascii=False)[:3000] + "..." if scraped_sources_list else "None",
+                # *** NEW: Flag if DOCX download is possible ***
+                'docx_available': PANDOC_AVAILABLE
             }
             yield from send_event(final_data)
             end_time_total = time.time()
             yield from send_progress(f"Research process completed successfully in {end_time_total - start_time_total:.2f} seconds.")
 
-        # Removed the outer StopIteration catch as it's no longer needed
         except Exception as e:
-            # Catch any unexpected errors in the main generator logic
             print(f"An unexpected error occurred during stream generation: {e}")
             import traceback
             traceback.print_exc()
             error_msg = f"Unexpected server error during research process: {type(e).__name__} - {e}"
-            # Send the final error event before the generator stops
             yield from send_error_event(error_msg)
-            # The generator will implicitly stop after this exception handler
 
-    # Make sure the topic is URL-encoded when passed to the EventSource URL
     return Response(stream_with_context(generate_updates()), content_type='text/event-stream')
+
+
+# --- NEW: DOCX Download Route ---
+@app.route('/download_docx', methods=['POST'])
+def download_docx():
+    """Converts the received Markdown report to DOCX and sends it as a download."""
+    if not PANDOC_AVAILABLE:
+        return "DOCX download is disabled because Pandoc is not correctly installed or configured.", 400
+
+    markdown_content = request.form.get('markdown_report')
+    topic = request.form.get('topic', 'Research Report') # Get topic for filename
+
+    if not markdown_content:
+        return "Error: No Markdown content received for conversion.", 400
+
+    try:
+        # Use pypandoc to convert Markdown text to DOCX bytes
+        docx_bytes = pypandoc.convert_text(
+            markdown_content,
+            'docx',
+            format='md',
+            # extra_args=['--reference-doc=my_template.docx'] # Optional: specify a template
+        )
+
+        # Create a BytesIO buffer to hold the DOCX data
+        buffer = BytesIO(docx_bytes)
+        buffer.seek(0)
+
+        # Sanitize topic for filename
+        safe_filename_topic = re.sub(r'[^\w\s-]', '', topic).strip()
+        safe_filename_topic = re.sub(r'[-\s]+', '_', safe_filename_topic)
+        filename = f"{safe_filename_topic[:50]}_Research_Report.docx" # Limit filename length
+
+        # Send the file
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=filename, # Use download_name for Flask >= 2.0
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
+
+    except FileNotFoundError:
+         print("ERROR: Pandoc executable not found during conversion attempt.")
+         return "Error: Pandoc executable not found. Please ensure it's installed and in the system PATH.", 500
+    except Exception as e:
+        print(f"Error converting Markdown to DOCX: {e}")
+        return f"An error occurred during DOCX conversion: {e}", 500
 
 
 # --- Run the App ---
 if __name__ == '__main__':
-    # Ensure libraries are installed: pip install Flask python-dotenv openai duckduckgo-search beautifulsoup4 requests lxml Markdown
-    # Consider performance implications of debug mode with threading/concurrency
-    app.run(debug=True, host='127.0.0.1', port=5001, threaded=True) # threaded=True is default and necessary for concurrent scraping
+    # Ensure libraries are installed: pip install Flask python-dotenv openai duckduckgo-search beautifulsoup4 requests lxml Markdown pypandoc
+    # Ensure Pandoc executable is installed and in PATH
+    app.run(debug=True, host='127.0.0.1', port=5001, threaded=True)

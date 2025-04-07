@@ -6,12 +6,16 @@
     <title>Research: {{ topic }}</title> <!-- Display original topic -->
     <link rel="stylesheet" href="{{ pico_css }}">
     <style>
+        /* --- NEW: Enable smooth scrolling for anchor links --- */
+        html {
+            scroll-behavior: smooth;
+        }
         body { padding-top: 1rem; padding-bottom: 3rem; }
         main.container { max-width: 960px; }
         h1, h2, h3 { margin-bottom: 0.5rem; }
         hr { margin: 2rem 0; }
         #progress-log-container {
-            max-height: 300px; /* Increased height slightly */
+            max-height: 300px;
             overflow-y: auto;
             background-color: var(--pico-card-background-color);
             border: 1px solid var(--pico-card-border-color);
@@ -21,8 +25,8 @@
             font-size: 0.875em;
         }
         #progress-log { list-style: none; padding-left: 0; margin: 0; }
-        #progress-log li { margin-bottom: 0.3rem; word-break: break-word; line-height: 1.4; } /* Improved readability */
-        #progress-log li:first-child { font-weight: bold; } /* Highlight latest */
+        #progress-log li { margin-bottom: 0.3rem; word-break: break-word; line-height: 1.4; }
+        #progress-log li:first-child { font-weight: bold; }
         #progress-log li.error { color: var(--pico-form-invalid-color); font-weight: bold; }
         .stream-container {
             border: 1px dashed var(--pico-primary-focus);
@@ -36,7 +40,7 @@
             word-wrap: break-word;
             font-family: monospace;
             font-size: 0.9em;
-            max-height: 400px; /* Limit height for long streams */
+            max-height: 400px;
             overflow-y: auto;
         }
         .stream-container h4 { margin-top: 0; color: var(--pico-primary); }
@@ -47,19 +51,63 @@
             border-radius: var(--pico-border-radius);
             border: 1px solid var(--pico-card-border-color);
          }
-        #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; border-bottom: 1px solid var(--pico-muted-border-color); padding-bottom: 0.2em; } /* Style headings */
+        #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; border-bottom: 1px solid var(--pico-muted-border-color); padding-bottom: 0.2em; }
         #final-report-content h1:first-child, #final-report-content h2:first-child { margin-top: 0; }
-        #final-report-content sup a { text-decoration: none; background-color: var(--pico-mark-background-color); padding: 1px 3px; border-radius: var(--pico-border-radius); color: var(--pico-mark-color); } /* Style footnotes */
-        #final-report-content sup a:hover { background-color: var(--pico-primary-focus); }
-        #final-report-content .footnotes { margin-top: 2em; padding-top: 1em; border-top: 1px solid var(--pico-card-border-color); font-size: 0.9em; }
+        /* --- Modified footnote link style for better visibility --- */
+        #final-report-content sup a {
+            text-decoration: none;
+            background-color: var(--pico-mark-background-color);
+            color: var(--pico-mark-color); /* Ensure text color contrasts with background */
+            padding: 2px 4px; /* Slightly more padding */
+            border-radius: var(--pico-border-radius);
+            font-size: 0.8em; /* Slightly smaller font */
+            vertical-align: super; /* Ensure it stays superscript */
+            transition: background-color 0.2s ease; /* Smooth transition */
+        }
+        #final-report-content sup a:hover, #final-report-content sup a:focus {
+             background-color: var(--pico-primary); /* Highlight on hover/focus */
+             color: var(--pico-primary-inverse); /* Ensure text is visible on hover */
+             outline: none; /* Remove default focus outline if needed */
+        }
+        /* --- Style for the footnote definition link (back arrow) --- */
+        #final-report-content .footnotes li p a {
+             text-decoration: none;
+             color: var(--pico-primary);
+        }
+        #final-report-content .footnotes li p a:hover {
+            text-decoration: underline;
+        }
+        /* --- Style for the footnote list itself --- */
+        #final-report-content .footnotes {
+             margin-top: 2.5em; /* More space before footnotes */
+             padding-top: 1.5em; /* More space inside the footnotes section */
+             border-top: 2px solid var(--pico-primary-focus); /* More prominent top border */
+             font-size: 0.9em;
+             line-height: 1.6; /* Improve readability */
+        }
         #final-report-content .footnotes ol { padding-left: 20px; }
-        #final-report-content .footnotes li { margin-bottom: 0.5em; }
+        #final-report-content .footnotes li { margin-bottom: 0.75em; } /* More space between items */
+        #final-report-content .footnotes li:target {
+             background-color: var(--pico-primary-focus); /* Highlight target footnote */
+             border-radius: var(--pico-border-radius);
+             outline: 1px solid var(--pico-primary);
+             /* Add a small transition */
+             transition: background-color 0.3s ease-in-out;
+        }
         #error-container { margin-top: 1.5rem; }
-        #error-container article { border-color: var(--pico-form-invalid-border-color); background-color: var(--pico-form-invalid-background-color); } /* Error styling */
+        #error-container article { border-color: var(--pico-form-invalid-border-color); background-color: var(--pico-form-invalid-background-color); }
         #error-container header { color: var(--pico-form-invalid-color); }
         article[aria-busy="true"]::before {
            width: 2rem;
            height: 2rem;
+        }
+        /* --- Style for download form --- */
+        #download-form {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: var(--pico-border-radius);
+            background-color: var(--pico-contrast-hover);
         }
     </style>
 </head>
@@ -68,7 +116,7 @@
         <hgroup>
             <h1>Research Progress</h1>
             <!-- Display the original, unencoded topic -->
-            <h2>Topic: {{ topic }}</h2>
+            <h2>Topic: {{ topic|e }}</h2> <!-- Use original topic, escape it -->
         </hgroup>
         <a href="/" role="button" class="secondary outline">Start New Research</a>
         <hr>
@@ -97,7 +145,7 @@
         <div id="error-container" style="display: none;">
             <article>
                 <header><strong>An Error Occurred</strong></header>
-                <p id="error-message"></p> <!-- No need for inline style, use CSS -->
+                <p id="error-message"></p>
             </article>
         </div>
 
@@ -105,6 +153,18 @@
         <section id="final-report-container" style="display: none;">
              <hr>
             <h2>Final Research Report</h2>
+
+            <!-- NEW: Download Form -->
+            <form id="download-form" action="/download_docx" method="post" style="display: none;">
+                 <p>Download the report:</p>
+                 <!-- Hidden field to store raw Markdown -->
+                 <textarea name="markdown_report" id="raw-markdown-report" style="display: none;"></textarea>
+                 <!-- Hidden field for topic (used for filename) -->
+                 <input type="hidden" name="topic" value="{{ topic|e }}">
+                 <button type="submit" id="download-docx-button">Download as DOCX</button>
+                 <small id="docx-unavailable-msg" style="display: none; color: var(--pico-muted-color); margin-left: 1rem;">DOCX download requires Pandoc on the server.</small>
+            </form>
+
             <div id="final-report-content">
                 <!-- Report HTML will be injected here -->
             </div>
@@ -120,7 +180,7 @@
 
     <script>
         const progressLog = document.getElementById('progress-log');
-        const progressLogContainer = document.getElementById('progress-log-container'); // Get container
+        const progressLogContainer = document.getElementById('progress-log-container');
         const progressArea = document.getElementById('progress-area');
         const finalReportContainer = document.getElementById('final-report-container');
         const finalReportContent = document.getElementById('final-report-content');
@@ -134,20 +194,26 @@
         const reportStreamContainer = document.getElementById('report-stream-container');
         const reportStreamContent = document.getElementById('report-stream-content');
 
-        // ***MODIFIED*** Get the URL-encoded topic passed from Flask
-        const encodedTopic = "{{ encoded_topic|e }}";
+        // --- NEW: Download elements ---
+        const downloadForm = document.getElementById('download-form');
+        const downloadDocxButton = document.getElementById('download-docx-button');
+        const docxUnavailableMsg = document.getElementById('docx-unavailable-msg');
+        const rawMarkdownReport = document.getElementById('raw-markdown-report');
 
-        let currentStreamTarget = null; // To track where LLM chunks should go ('synthesis' or 'report')
+        // Get the URL-encoded topic passed from Flask
+        const encodedTopic = "{{ encoded_topic|e }}"; // Still need encoded for SSE URL
+        const displayTopic = "{{ topic|e }}"; // Use original for display/forms
+
+        let currentStreamTarget = null;
 
         function addProgress(message, isError = false) {
             const li = document.createElement('li');
-            // Basic sanitization (replace < >)
+            // Basic sanitization (replace < >) - avoid complex HTML injection from progress messages
             li.textContent = message.replace(/</g, "<").replace(/>/g, ">");
             if (isError) {
                 li.classList.add('error');
             }
-            progressLog.insertBefore(li, progressLog.firstChild); // Add to top
-            // Keep the log scrolled to the top (most recent)
+            progressLog.insertBefore(li, progressLog.firstChild);
             progressLogContainer.scrollTop = 0;
         }
 
@@ -163,11 +229,9 @@
                 targetContainer = reportStreamContainer;
                 reportStreamContainer.style.display = 'block';
             } else {
-                return; // Unknown target
+                return;
             }
-            // Append chunk (using textContent is safer against potential XSS in chunks)
             targetEl.textContent += content;
-            // Auto-scroll the stream container to the bottom
             targetContainer.scrollTop = targetContainer.scrollHeight;
         }
 
@@ -188,62 +252,79 @@
                         addProgress(errorMsgText, true);
                         errorMessage.textContent = errorMsgText;
                         errorContainer.style.display = 'block';
-                        progressArea.removeAttribute('aria-busy'); // Stop spinner
-                        // Keep stream open for potential further errors, but stop main process indicator
-                        // eventSource.close(); // Don't close here, let server close or onerror handle it
+                        progressArea.removeAttribute('aria-busy');
+                        // Consider closing eventSource on fatal errors if needed
+                        // eventSource.close();
                         break;
-                    case 'stream_start': // LLM stream starting
-                         currentStreamTarget = data.target; // e.g., 'synthesis' or 'report'
+                    case 'stream_start':
+                         currentStreamTarget = data.target;
                          addProgress(`AI starting to generate: ${currentStreamTarget}...`);
-                         // Show the correct container and clear previous content if any
                          if (currentStreamTarget === 'synthesis') {
-                             synthesisStreamContent.textContent = ''; // Clear old content
+                             synthesisStreamContent.textContent = '';
                              synthesisStreamContainer.style.display = 'block';
                          }
                          if (currentStreamTarget === 'report') {
-                             reportStreamContent.textContent = ''; // Clear old content
+                             reportStreamContent.textContent = '';
                              reportStreamContainer.style.display = 'block';
                          }
                          break;
-                    case 'llm_chunk': // Chunk of LLM text arrived
+                    case 'llm_chunk':
                          if (currentStreamTarget === data.target) {
                             handleStreamChunk(data.content, data.target);
                          }
                          break;
                     case 'complete':
                         addProgress("Research process complete.");
-                        progressArea.removeAttribute('aria-busy'); // Stop spinner
-                        finalReportContent.innerHTML = data.report_html; // Render final formatted report
+                        progressArea.removeAttribute('aria-busy');
+                        finalReportContent.innerHTML = data.report_html;
+
+                        // --- NEW: Handle download section ---
+                        if (data.report_markdown) {
+                            rawMarkdownReport.value = data.report_markdown; // Store raw markdown
+                            if (data.docx_available) {
+                                downloadForm.style.display = 'block'; // Show download form
+                                downloadDocxButton.disabled = false;
+                                docxUnavailableMsg.style.display = 'none';
+                            } else {
+                                // Pandoc not available on server
+                                downloadForm.style.display = 'block'; // Still show section
+                                downloadDocxButton.disabled = true; // Disable button
+                                docxUnavailableMsg.style.display = 'inline'; // Show warning
+                            }
+                        } else {
+                            addProgress("No final report markdown received.", true);
+                            downloadForm.style.display = 'none'; // Hide form if no markdown
+                        }
+
                         if (data.raw_scraped_data_preview) {
                            scrapedPreview.textContent = data.raw_scraped_data_preview;
                         } else {
                            scrapedPreview.textContent = "Not available.";
                         }
                         finalReportContainer.style.display = 'block'; // Show report section
+
                         eventSource.close(); // Research is done, close connection
                         break;
                 }
             } catch (e) {
-                console.error("Error parsing SSE data:", e);
+                console.error("Error parsing SSE data:", e, "Raw data:", event.data); // Log raw data on error
                 addProgress("Error processing update from server.", true);
             }
         };
 
         eventSource.onerror = function(err) {
             console.error("EventSource failed:", err);
-            // Check readyState: 0=CONNECTING, 1=OPEN, 2=CLOSED
             if (eventSource.readyState === EventSource.CLOSED) {
-                 addProgress("Server connection closed.", false); // Normal if process finished or server stopped
+                 addProgress("Server connection closed.", false);
             } else if (eventSource.readyState === EventSource.CONNECTING) {
                  addProgress("Connection lost, attempting to reconnect...", true);
-                 // Browser usually handles reconnect automatically unless server is down
             } else {
                 const errorMsg = "Connection to server lost or failed unexpectedly. Please try starting new research.";
                 addProgress(errorMsg, true);
                 errorMessage.textContent = errorMsg;
                 errorContainer.style.display = 'block';
-                progressArea.removeAttribute('aria-busy'); // Stop spinner
-                if (eventSource) eventSource.close(); // Explicitly close on definite error
+                progressArea.removeAttribute('aria-busy');
+                if (eventSource) eventSource.close();
             }
         };
 
