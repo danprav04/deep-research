@@ -297,6 +297,11 @@
                          }
                          break;
                     case 'complete':
+                        // --- ADDED CONSOLE LOGS HERE ---
+                        console.log("Received 'complete' event data:", data);
+                        console.log("Checking data.docx_available:", data.docx_available);
+                        // -----------------------------
+
                         addProgress("Research process complete.");
                         progressArea.removeAttribute('aria-busy');
                         finalReportContent.innerHTML = data.report_html;

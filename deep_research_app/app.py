@@ -30,6 +30,10 @@ except ImportError:
     print("RECOMMENDATION: Install 'html2docx' (pip install html2docx)")
     DOCX_CONVERSION_AVAILABLE = False
 
+# --- ADDED DEBUG PRINT HERE ---
+print(f"DEBUG: DOCX_CONVERSION_AVAILABLE set to: {DOCX_CONVERSION_AVAILABLE} at script start.")
+# -----------------------------
+
 
 # --- Configuration ---
 load_dotenv()
@@ -879,7 +883,7 @@ def stream():
             }
             yield from send_event(final_data)
             end_time_total = time.time()
-            yield from send_progress(f"Research process completed in {end_time_total - start_time_total:.2f} seconds.")
+            yield from send_progress(f"Research process completed successfully in {end_time_total - start_time_total:.2f} seconds.")
 
         except Exception as e:
             print(f"An unexpected error occurred during stream generation: {e}")
