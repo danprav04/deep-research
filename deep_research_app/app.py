@@ -139,15 +139,16 @@ def stream():
             research_plan = parse_research_plan(plan_response)
 
             # Check if parsing failed or returned the failure indicator
-            if not research_plan or (len(research_plan) == 1 and research_plan[0]["step_description"].startswith("Failed")):
-                 fail_reason = research_plan[0]["step_description"] if research_plan else "Could not parse plan."
+            # Use 'step' key consistent with utils.py change
+            if not research_plan or (len(research_plan) == 1 and research_plan[0]["step"].startswith("Failed")):
+                 fail_reason = research_plan[0]["step"] if research_plan else "Could not parse plan."
                  raw_snippet = f" Raw LLM Response Snippet: '{plan_response[:150]}...'" if plan_response else " (LLM Response was empty)"
                  yield from send_error_event(f"Failed to create/parse research plan. Reason: {fail_reason}.{raw_snippet}", is_fatal=True)
                  return
 
             yield from send_progress(f"Generated {len(research_plan)} step plan.")
             for i, step in enumerate(research_plan):
-                 yield from send_progress(f"  Step {i+1}: {step['step_description']} (Keywords: {step['keywords']})")
+                 yield from send_progress(f"  Step {i+1}: {step['step']} (Keywords: {step['keywords']})") # Use 'step' key
 
 
             # === Step 2a: Search and Collect URLs ===
@@ -158,8 +159,8 @@ def stream():
             total_search_queries = 0
 
             for i, step in enumerate(research_plan):
-                step_desc = step.get('step_description', f'Unnamed Step {i+1}')
-                keywords = step.get('keywords', [])
+                step_desc = step.get('step', f'Unnamed Step {i+1}') # Use 'step' key
+                keywords = step.get('keywords', []) # 'keywords' key is correct
 
                 yield from send_progress(f"Searching - Step {i+1}/{len(research_plan)}: '{step_desc[:70]}{'...' if len(step_desc)>70 else ''}'")
                 if not keywords:
@@ -355,7 +356,7 @@ def stream():
                ```
 
             Instructions:
-            1. Write a final report in Markdown format with sections: `# Research Report: {topic}`, `## Introduction`, `## Findings`, `## Conclusion`, `## Bibliography`.
+            1. Write a final report in **well-formatted Markdown** with sections: `# Research Report: {topic}`, `## Introduction`, `## Findings`, `## Conclusion`, `## Bibliography`. Use headings, lists, bold, italics where appropriate.
             2. **Introduction**: Introduce "{topic}", state the report's purpose, and briefly outline the research plan steps.
             3. **Findings**: Organize by plan step (`### Step X: <Description>`). Integrate the synthesized information for each step. If synthesis was empty or missing for a step, state that clearly.
             4. **CRITICAL CITATION REPLACEMENT**: Find EVERY occurrence of `[Source URL: <full_url_here>]` in the synthesized text. Replace it with the corresponding Markdown footnote `[^N]`, where N is the number associated with `<full_url_here>` in the Bibliography Map. If a URL in a citation tag is NOT found in the Bibliography Map, OMIT the citation marker entirely for that instance.

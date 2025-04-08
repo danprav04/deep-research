@@ -1,382 +1,310 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Research: {{ topic }}</title> <!-- Display original topic -->
+    <title>Deep Research: {{ topic }}</title>
     <link rel="stylesheet" href="{{ pico_css }}">
+    <!-- Tippy.js for interactive footnotes -->
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
     <style>
-        /* --- NEW: Enable smooth scrolling for anchor links --- */
-        html {
-            scroll-behavior: smooth;
+        body { padding-bottom: 5rem; } /* Prevent content hiding behind footer */
+        main { padding-top: 1rem; }
+        #progress-updates { max-height: 300px; overflow-y: auto; background-color: var(--card-background-color); border: 1px solid var(--card-border-color); padding: 1rem; margin-bottom: 1.5rem; border-radius: var(--border-radius); font-size: 0.9em; }
+        #progress-updates p { margin-bottom: 0.5em; }
+        #progress-updates .error { color: var(--pico-color-red-500); font-weight: bold; }
+        #final-report-container article { margin-top: 2rem; padding: 1.5rem; border: 1px solid var(--card-border-color); border-radius: var(--border-radius); background-color: var(--card-background-color); }
+        /* Markdown Styles */
+        #final-report-html h1, #final-report-html h2, #final-report-html h3 { margin-top: 1.5em; margin-bottom: 0.8em; }
+        #final-report-html h1 { border-bottom: 2px solid var(--primary); padding-bottom: 0.3em; }
+        #final-report-html h2 { border-bottom: 1px solid var(--secondary); padding-bottom: 0.2em; }
+        #final-report-html p { line-height: 1.6; }
+        #final-report-html ul, #final-report-html ol { margin-left: 2em; margin-bottom: 1em; }
+        #final-report-html blockquote { border-left: 4px solid var(--muted-border-color); padding-left: 1em; margin-left: 0; color: var(--muted-color); }
+        #final-report-html pre { background-color: var(--code-background-color); padding: 1em; border-radius: var(--border-radius); overflow-x: auto; }
+        #final-report-html code { font-family: var(--font-monospace); background-color: var(--code-background-color); padding: 0.2em 0.4em; border-radius: 3px; }
+        #final-report-html pre code { background-color: transparent; padding: 0; }
+        #final-report-html .footnote-ref a { /* Style the [^1] links */
+            background-color: var(--primary-background); color: var(--primary); padding: 1px 4px; border-radius: 3px; text-decoration: none; font-size: 0.85em; vertical-align: super;
         }
-        body { padding-top: 1rem; padding-bottom: 3rem; }
-        main.container { max-width: 960px; }
-        h1, h2, h3 { margin-bottom: 0.5rem; }
-        hr { margin: 2rem 0; }
-        #progress-log-container {
-            max-height: 300px;
-            overflow-y: auto;
-            background-color: var(--pico-card-background-color);
-            border: 1px solid var(--pico-card-border-color);
-            padding: 1rem;
-            border-radius: var(--pico-border-radius);
-            margin-bottom: 1.5rem;
-            font-size: 0.875em;
+        #final-report-html .footnote-ref a:hover { background-color: var(--primary-hover); }
+        #final-report-html .footnotes { margin-top: 2em; padding-top: 1em; border-top: 1px solid var(--muted-border-color); font-size: 0.9em; color: var(--muted-color); }
+        #final-report-html .footnotes ol { margin-left: 1em; }
+        #final-report-html .footnotes li { margin-bottom: 0.5em; }
+        #final-report-html .footnotes p { display: inline; } /* Prevent extra paragraphs in footnotes */
+        /* Tippy.js Tooltip Style */
+        .tippy-box[data-theme~='light-border'] {
+            border: 1px solid var(--primary);
+            background-color: var(--card-background-color);
+            color: var(--color);
         }
-        #progress-log { list-style: none; padding-left: 0; margin: 0; }
-        #progress-log li { margin-bottom: 0.3rem; word-break: break-word; line-height: 1.4; }
-        #progress-log li:first-child { font-weight: bold; }
-        #progress-log li.error { color: var(--pico-form-invalid-color); font-weight: bold; }
-        .stream-container {
-            border: 1px dashed var(--pico-primary-focus);
-            padding: 1rem;
-            margin-top: 1rem;
-            margin-bottom: 1.5rem;
-            border-radius: var(--pico-border-radius);
-            background-color: var(--pico-contrast-hover);
-            display: none;
-            font-family: monospace;
-            font-size: 0.9em;
-            max-height: 400px;
-            overflow-y: auto;
-            /* --- MODIFIED: Ensure wrapping for stream content --- */
-            white-space: pre-wrap;    /* Wrap lines but preserve line breaks/spaces */
-            word-wrap: break-word;    /* Force break long words/URLs */
-            overflow-wrap: break-word;/* Alias for word-wrap, broader compatibility */
-        }
-        /* --- NEW: Explicitly target pre tags inside stream container --- */
-        .stream-container pre {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            margin: 0; /* Remove default pre margin */
-        }
-
-        .stream-container h4 { margin-top: 0; color: var(--pico-primary); }
-        #final-report-container { margin-top: 2rem; }
-        #final-report-content {
-            background-color: var(--pico-card-background-color);
-            padding: 1.5rem;
-            border-radius: var(--pico-border-radius);
-            border: 1px solid var(--pico-card-border-color);
-            /* --- NEW: Add wrapping for final report content --- */
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-         }
-        #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; border-bottom: 1px solid var(--pico-muted-border-color); padding-bottom: 0.2em; }
-        #final-report-content h1:first-child, #final-report-content h2:first-child { margin-top: 0; }
-        /* --- NEW: Add wrapping specifically for pre tags within final report --- */
-        #final-report-content pre {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            background-color: var(--pico-contrast); /* Optional: Style code blocks */
-            padding: 1em;
-            border-radius: var(--pico-border-radius);
-            overflow-x: auto; /* Add horizontal scroll if absolutely needed, but wrap preferred */
-        }
-        /* --- Modified footnote link style for better visibility --- */
-        #final-report-content sup a {
-            text-decoration: none;
-            background-color: var(--pico-mark-background-color);
-            color: var(--pico-mark-color); /* Ensure text color contrasts with background */
-            padding: 2px 4px; /* Slightly more padding */
-            border-radius: var(--pico-border-radius);
-            font-size: 0.8em; /* Slightly smaller font */
-            vertical-align: super; /* Ensure it stays superscript */
-            transition: background-color 0.2s ease; /* Smooth transition */
-        }
-        #final-report-content sup a:hover, #final-report-content sup a:focus {
-             background-color: var(--pico-primary); /* Highlight on hover/focus */
-             color: var(--pico-primary-inverse); /* Ensure text is visible on hover */
-             outline: none; /* Remove default focus outline if needed */
-        }
-        /* --- Style for the footnote definition link (back arrow) --- */
-        #final-report-content .footnotes li p a {
-             text-decoration: none;
-             color: var(--pico-primary);
-        }
-        #final-report-content .footnotes li p a:hover {
-            text-decoration: underline;
-        }
-        /* --- Style for the footnote list itself --- */
-        #final-report-content .footnotes {
-             margin-top: 2.5em; /* More space before footnotes */
-             padding-top: 1.5em; /* More space inside the footnotes section */
-             border-top: 2px solid var(--pico-primary-focus); /* More prominent top border */
-             font-size: 0.9em;
-             line-height: 1.6; /* Improve readability */
-        }
-        #final-report-content .footnotes ol { padding-left: 20px; }
-        #final-report-content .footnotes li { margin-bottom: 0.75em; } /* More space between items */
-        #final-report-content .footnotes li:target {
-             background-color: var(--pico-primary-focus); /* Highlight target footnote */
-             border-radius: var(--pico-border-radius);
-             outline: 1px solid var(--pico-primary);
-             /* Add a small transition */
-             transition: background-color 0.3s ease-in-out;
-        }
-        #error-container { margin-top: 1.5rem; }
-        #error-container article { border-color: var(--pico-form-invalid-border-color); background-color: var(--pico-form-invalid-background-color); }
-        #error-container header { color: var(--pico-form-invalid-color); }
-        article[aria-busy="true"]::before {
-           width: 2rem;
-           height: 2rem;
-        }
-        /* --- Style for download form --- */
-        #download-form {
-            margin-top: 1.5rem;
-            padding: 1rem;
-            border: 1px solid var(--pico-muted-border-color);
-            border-radius: var(--pico-border-radius);
-            background-color: var(--pico-contrast-hover);
-        }
+        .tippy-box[data-theme~='light-border'][data-placement^='top'] > .tippy-arrow::before { border-top-color: var(--primary); }
+        .tippy-box[data-theme~='light-border'][data-placement^='bottom'] > .tippy-arrow::before { border-bottom-color: var(--primary); }
+        .tippy-box[data-theme~='light-border'][data-placement^='left'] > .tippy-arrow::before { border-left-color: var(--primary); }
+        .tippy-box[data-theme~='light-border'][data-placement^='right'] > .tippy-arrow::before { border-right-color: var(--primary); }
+        .tippy-content { word-break: break-all; } /* Allow long URLs to wrap */
     </style>
 </head>
 <body>
+    <nav class="container-fluid">
+        <ul>
+            <li><a href="/" class="contrast"><strong>Deep Research Assistant</strong></a></li>
+        </ul>
+        <ul>
+            <li>
+                <a href="{{ url_for('index') }}" role="button" class="outline">New Research</a>
+            </li>
+        </ul>
+    </nav>
+
     <main class="container">
-        <hgroup>
-            <h1>Research Progress</h1>
-            <!-- Display the original, unencoded topic -->
-            <h2>Topic: {{ topic|e }}</h2> <!-- Use original topic, escape it -->
-        </hgroup>
-        <a href="/" role="button" class="secondary outline">Start New Research</a>
-        <hr>
+        <section id="topic-section">
+            <h2 style="word-break: break-word;">Researching: {{ topic }}</h2>
+            <a href="{{ url_for('index') }}" role="button" class="secondary outline">← Start New Research</a>
+        </section>
 
-        <!-- Progress Area -->
-        <article id="progress-area" aria-busy="true">
-            <h3>Live Progress Log</h3>
-            <div id="progress-log-container">
-                <ul id="progress-log">
-                    <li>Initializing research process...</li>
-                </ul>
+        <section id="progress-section">
+            <h3>Research Progress</h3>
+            <div id="progress-updates">
+                <p>Initializing research process...</p>
             </div>
+            <progress id="progress-bar" style="display: none;"></progress> <!-- Optional: Visual progress bar -->
+        </section>
 
-            <!-- Streaming Output Area -->
-            <div id="synthesis-stream-container" class="stream-container">
-                <h4>Synthesizing Information (Live)...</h4>
-                <pre id="synthesis-stream-content"></pre>
-            </div>
-            <div id="report-stream-container" class="stream-container">
-                <h4>Generating Report (Live)...</h4>
-                <pre id="report-stream-content"></pre>
-            </div>
-        </article>
-
-        <!-- Error Display Area -->
-        <div id="error-container" style="display: none;">
+        <section id="synthesis-output-container" style="display: none;">
+            <h3>Synthesized Information (Live)</h3>
             <article>
-                <header><strong>An Error Occurred</strong></header>
-                <p id="error-message"></p>
+                <div id="synthesis-output"></div>
+            </article>
+        </section>
+
+        <section id="final-report-container" style="display: none;">
+            <h3>Final Research Report</h3>
+            <form id="download-form" action="{{ url_for('download_docx') }}" method="post" style="margin-bottom: 1rem; display: none;">
+                <input type="hidden" name="markdown_report" id="markdown_report_hidden">
+                <input type="hidden" name="topic" value="{{ topic }}">
+                {# Disable button if conversion not available - handled via JS #}
+                <button type="submit" id="download-docx-button">Download as DOCX</button>
+                <small id="docx-unavailable-msg" style="display: none; color: var(--muted-color); margin-left: 1em;">DOCX download requires the 'html2docx' library on the server.</small>
+            </form>
+            <article>
+                <div id="final-report-html">
+                    <p><i>Final report will be generated here...</i></p>
+                </div>
+            </article>
+        </section>
+
+        <details id="raw-data-preview-container" style="display: none; margin-top: 2rem;">
+            <summary>Raw Scraped Data Preview (Limited)</summary>
+            <h3>Raw Scraped Data Preview (Limited)</h3>
+            <pre><code id="raw-data-content" style="font-size: 0.8em; max-height: 400px; overflow-y: auto; display: block;"></code></pre>
+        </details>
+
+        <div id="error-container" class="container" style="margin-top: 2rem; display: none;">
+             <article class="error-message" style="background-color: var(--pico-form-element-invalid-background-color); border-color: var(--pico-form-element-invalid-border-color); color: var(--pico-form-element-invalid-active-color);">
+                <h4 style="color: inherit;">An Error Occurred</h4>
+                <p id="error-message-text"></p>
+                <button onclick="document.getElementById('error-container').style.display='none'">Dismiss</button>
             </article>
         </div>
 
-        <!-- Final Report Area -->
-        <section id="final-report-container" style="display: none;">
-             <hr>
-            <h2>Final Research Report</h2>
-
-            <!-- Download Form -->
-            <form id="download-form" action="/download_docx" method="post" style="display: none;">
-                 <p>Download the report:</p>
-                 <!-- Hidden field to store raw Markdown -->
-                 <textarea name="markdown_report" id="raw-markdown-report" style="display: none;"></textarea>
-                 <!-- Hidden field for topic (used for filename) -->
-                 <input type="hidden" name="topic" value="{{ topic|e }}">
-                 <button type="submit" id="download-docx-button">Download as DOCX</button>
-                 <!-- --- MODIFIED: Corrected library name in message --- -->
-                 <small id="docx-unavailable-msg" style="display: none; color: var(--pico-muted-color); margin-left: 1rem;">DOCX download requires the 'html2docx' library on the server.</small>
-            </form>
-
-            <div id="final-report-content">
-                <!-- Report HTML will be injected here -->
-            </div>
-             <details style="margin-top: 2rem;">
-                 <summary>Raw Scraped Data Snippet (Debug)</summary>
-                 <pre id="scraped-preview" style="font-size: 0.8em; background: var(--pico-contrast); max-height: 200px; overflow-y: auto;">Not available.</pre>
-             </details>
-        </section>
-
-        <hr style="margin-top: 30px;">
-        <a href="/" role="button" class="secondary outline">Start New Research</a>
     </main>
 
+    <footer class="container" style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--border-color);">
+        <small>Powered by Google Gemini & Web Research</small>
+    </footer>
+
     <script>
-        const progressLog = document.getElementById('progress-log');
-        const progressLogContainer = document.getElementById('progress-log-container');
-        const progressArea = document.getElementById('progress-area');
-        const finalReportContainer = document.getElementById('final-report-container');
-        const finalReportContent = document.getElementById('final-report-content');
-        const errorContainer = document.getElementById('error-container');
-        const errorMessage = document.getElementById('error-message');
-        const scrapedPreview = document.getElementById('scraped-preview');
+        document.addEventListener('DOMContentLoaded', function() {
+         const encodedTopic = "{{ encoded_topic }}";
+         const progressUpdates = document.getElementById('progress-updates');
+         const progressBar = document.getElementById('progress-bar'); // Optional progress bar
+         const synthesisContainer = document.getElementById('synthesis-output-container');
+         const synthesisOutput = document.getElementById('synthesis-output');
+         const finalReportContainer = document.getElementById('final-report-container');
+         const finalReportHtml = document.getElementById('final-report-html');
+         const downloadForm = document.getElementById('download-form');
+         const markdownReportHidden = document.getElementById('markdown_report_hidden');
+         const downloadDocxButton = document.getElementById('download-docx-button');
+         const docxUnavailableMsg = document.getElementById('docx-unavailable-msg');
+         const rawDataPreviewContainer = document.getElementById('raw-data-preview-container');
+         const rawDataContent = document.getElementById('raw-data-content');
+         const errorContainer = document.getElementById('error-container');
+         const errorMessageText = document.getElementById('error-message-text');
 
-        // Stream containers and content elements
-        const synthesisStreamContainer = document.getElementById('synthesis-stream-container');
-        const synthesisStreamContent = document.getElementById('synthesis-stream-content');
-        const reportStreamContainer = document.getElementById('report-stream-container');
-        const reportStreamContent = document.getElementById('report-stream-content');
+         // --- Event Source Setup ---
+         const eventSource = new EventSource(`/stream?topic=${encodedTopic}`);
 
-        // Download elements
-        const downloadForm = document.getElementById('download-form');
-        const downloadDocxButton = document.getElementById('download-docx-button');
-        const docxUnavailableMsg = document.getElementById('docx-unavailable-msg');
-        const rawMarkdownReport = document.getElementById('raw-markdown-report');
+         addProgress("Connecting to research stream...");
 
-        // Get the URL-encoded topic passed from Flask
-        const encodedTopic = "{{ encoded_topic|e }}"; // Still need encoded for SSE URL
-        const displayTopic = "{{ topic|e }}"; // Use original for display/forms
+         function addProgress(message, isError = false) {
+             const p = document.createElement('p');
+             // Basic sanitization: replace < and > to prevent accidental HTML injection in progress messages
+             p.textContent = message.replace(/</g, "<").replace(/>/g, ">");
+             if (isError) {
+                 p.classList.add('error');
+             }
+             progressUpdates.appendChild(p);
+             // Auto-scroll to the bottom
+             progressUpdates.scrollTop = progressUpdates.scrollHeight;
 
-        let currentStreamTarget = null;
+             // Optional: Update progress bar vaguely (e.g., indeterminate)
+             if (progressBar) progressBar.style.display = 'block';
+         }
 
-        function addProgress(message, isError = false) {
-            const li = document.createElement('li');
-            // Basic sanitization (replace < >) - avoid complex HTML injection from progress messages
-            li.textContent = message.replace(/</g, "<").replace(/>/g, ">");
-            if (isError) {
-                li.classList.add('error');
-            }
-            progressLog.insertBefore(li, progressLog.firstChild);
-            progressLogContainer.scrollTop = 0;
-        }
+         eventSource.onmessage = function(event) {
+             const data = JSON.parse(event.data);
+             console.log("SSE Event received:", data); // Debug log
 
-        function handleStreamChunk(content, target) {
-            let targetEl;
-            let targetContainer;
-            if (target === 'synthesis') {
-                targetEl = synthesisStreamContent;
-                targetContainer = synthesisStreamContainer;
-                synthesisStreamContainer.style.display = 'block';
-            } else if (target === 'report') {
-                targetEl = reportStreamContent;
-                targetContainer = reportStreamContainer;
-                reportStreamContainer.style.display = 'block';
-            } else {
-                return;
-            }
-            targetEl.textContent += content;
-            targetContainer.scrollTop = targetContainer.scrollHeight;
-        }
+             switch (data.type) {
+                 case 'progress':
+                     addProgress(data.message);
+                     break;
 
-        // Establish SSE connection using the encoded topic
-        const params = new URLSearchParams({ topic: encodedTopic });
-        const eventSource = new EventSource(`/stream?${params.toString()}`);
+                 case 'stream_start':
+                     // Show the relevant output container
+                     if (data.target === 'synthesis') {
+                         synthesisContainer.style.display = 'block';
+                         synthesisOutput.innerHTML = ''; // Clear previous content if any
+                         addProgress("Receiving synthesized information stream...");
+                     } else if (data.target === 'report') {
+                         // Clear previous report content if re-running logic allows it
+                         finalReportContainer.style.display = 'block'; // Show container early
+                         finalReportHtml.innerHTML = '<p><i>Generating final report...</i></p>';
+                         downloadForm.style.display = 'none'; // Hide download until ready
+                         addProgress("Receiving final report stream...");
+                     }
+                     break;
 
-        eventSource.onmessage = function(event) {
-            try {
-                const data = JSON.parse(event.data);
-
-                switch (data.type) {
-                    case 'progress':
-                        addProgress(`[${new Date().toLocaleTimeString()}] ${data.message}`);
-                        break;
-                    case 'error':
-                        const errorMsgText = `ERROR: ${data.message}`;
-                        addProgress(errorMsgText, true);
-                        errorMessage.textContent = errorMsgText;
-                        errorContainer.style.display = 'block';
-                        progressArea.removeAttribute('aria-busy');
-                        // Don't close eventSource on all errors, maybe recoverable
-                        break;
-                    case 'stream_start':
-                         currentStreamTarget = data.target;
-                         addProgress(`AI starting to generate: ${currentStreamTarget}...`);
-                         if (currentStreamTarget === 'synthesis') {
-                             synthesisStreamContent.textContent = '';
-                             synthesisStreamContainer.style.display = 'block';
+                 case 'llm_chunk':
+                      // Append chunks to the correct target
+                      if (data.target === 'synthesis') {
+                          // Check if the synthesis output container is visible
+                         if (synthesisContainer.style.display !== 'block') {
+                             synthesisContainer.style.display = 'block';
+                             synthesisOutput.innerHTML = ''; // Clear if wasn't visible before
                          }
-                         if (currentStreamTarget === 'report') {
-                             reportStreamContent.textContent = '';
-                             reportStreamContainer.style.display = 'block';
-                         }
-                         break;
-                    case 'llm_chunk':
-                         if (currentStreamTarget === data.target) {
-                            handleStreamChunk(data.content, data.target);
-                         }
-                         break;
-                    case 'complete':
-                        // --- ADDED CONSOLE LOGS HERE ---
-                        console.log("Received 'complete' event data:", data);
-                        console.log("Checking data.docx_available:", data.docx_available);
+                         // Append content - assuming LLM generates markdown/text
+                         // We don't render markdown live here, just show raw stream
+                          const cleanedChunk = data.content.replace(/</g, "<").replace(/>/g, ">");
+                         synthesisOutput.innerHTML += cleanedChunk; // Append cleaned text chunk
 
-                        // --- More explicit check ---
-                        const isDocxTrulyAvailable = data.docx_available === true;
-                        console.log("Result of strict check (isDocxTrulyAvailable):", isDocxTrulyAvailable);
-                        // -------------------------
+                     } else if (data.target === 'report') {
+                         // For the report, we wait for 'complete' to render the full HTML
+                         // We could show raw chunks here too if desired, similar to synthesis:
+                          // if (finalReportHtml.innerHTML.includes('<i>Generating final report...</i>')) {
+                          //     finalReportHtml.innerHTML = ''; // Clear placeholder on first chunk
+                          // }
+                          // finalReportHtml.innerHTML += data.content.replace(/</g, "<").replace(/>/g, ">"); // Append cleaned chunk
+                     }
+                     break;
 
+                 case 'complete':
+                     finalReportContainer.style.display = 'block';
+                     finalReportHtml.innerHTML = data.report_html; // Render final HTML
+                     markdownReportHidden.value = data.report_markdown; // Store raw markdown for download
+                     // Enable/disable DOCX download based on server flag
+                     if (data.docx_available) {
+                         downloadDocxButton.disabled = false;
+                         downloadForm.style.display = 'inline-block'; // Show form
+                         docxUnavailableMsg.style.display = 'none';
+                     } else {
+                         downloadDocxButton.disabled = true;
+                          downloadForm.style.display = 'inline-block'; // Still show the form area
+                         downloadDocxButton.style.display = 'none'; // Hide the button itself
+                         docxUnavailableMsg.style.display = 'inline'; // Show explanation
+                     }
 
-                        addProgress("Research process complete.");
-                        progressArea.removeAttribute('aria-busy');
-                        finalReportContent.innerHTML = data.report_html;
+                     // Show raw data preview
+                     rawDataPreviewContainer.style.display = 'block';
+                     rawDataContent.textContent = data.raw_scraped_data_preview;
 
-                        // Handle download section
-                        if (data.report_markdown) {
-                            rawMarkdownReport.value = data.report_markdown; // Store raw markdown
-                            // --- Use the stricter variable ---
-                            if (isDocxTrulyAvailable) {
-                                console.log("JS Logic: DOCX determined AVAILABLE."); // Add log
-                                downloadForm.style.display = 'block';
-                                downloadDocxButton.disabled = false;
-                                docxUnavailableMsg.style.display = 'none';
-                            } else {
-                                console.log("JS Logic: DOCX determined UNAVAILABLE."); // Add log
-                                downloadForm.style.display = 'block';
-                                downloadDocxButton.disabled = true;
-                                docxUnavailableMsg.style.display = 'inline';
-                            }
-                        } else {
-                             console.log("JS Logic: No markdown, hiding download form."); // Add log
-                            addProgress("No final report markdown received.", true);
-                            downloadForm.style.display = 'none';
-                        }
+                     // Initialize Tippy.js for footnote tooltips *after* content is rendered
+                     initializeFootnoteTooltips();
 
-                        if (data.raw_scraped_data_preview) {
-                           scrapedPreview.textContent = data.raw_scraped_data_preview;
-                        } else {
-                           scrapedPreview.textContent = "Not available.";
-                        }
-                        finalReportContainer.style.display = 'block'; // Show report section
+                     addProgress("Processing complete. Report generated.");
+                     if (progressBar) progressBar.style.display = 'none'; // Hide progress bar
+                     break;
 
-                        eventSource.close(); // Research is done, close connection
-                        break;
-                    case 'stream_terminated': // Added to handle graceful close from server finally block
-                        addProgress("Server stream terminated.", false);
-                        progressArea.removeAttribute('aria-busy');
-                        if (eventSource) eventSource.close();
-                        break;
-                }
-            } catch (e) {
-                console.error("Error parsing SSE data:", e, "Raw data:", event.data); // Log raw data on error
-                addProgress("Error processing update from server.", true);
-            }
-        };
+                 case 'error':
+                     addProgress(`ERROR: ${data.message}`, true);
+                     // Show dedicated error message area
+                     errorMessageText.textContent = data.message;
+                     errorContainer.style.display = 'block';
+                     if (data.fatal) {
+                         addProgress("A fatal error occurred. Stopping process.", true);
+                         eventSource.close(); // Stop listening on fatal errors
+                         if (progressBar) progressBar.style.display = 'none';
+                     }
+                     break;
 
-        eventSource.onerror = function(err) {
-            console.error("EventSource failed:", err);
-            if (eventSource.readyState === EventSource.CLOSED) {
-                 addProgress("Server connection closed.", false);
-            } else if (eventSource.readyState === EventSource.CONNECTING) {
-                 addProgress("Connection lost, attempting to reconnect...", true);
-                 // No need to display the big error message yet, browser might reconnect
-            } else {
-                const errorMsg = "Connection to server lost or failed unexpectedly. Please try starting new research.";
-                addProgress(errorMsg, true);
-                errorMessage.textContent = errorMsg;
-                errorContainer.style.display = 'block';
-                progressArea.removeAttribute('aria-busy');
-                if (eventSource) eventSource.close(); // Close definitively on unrecoverable error
-            }
-        };
+                 case 'stream_terminated':
+                     addProgress("Server stream finished.");
+                     eventSource.close();
+                     if (progressBar) {
+                          // Set progress bar to 100% or hide it
+                          progressBar.removeAttribute('value'); // Make it indeterminate if needed, or hide
+                          progressBar.style.display = 'none';
+                     }
+                     // If the report hasn't been displayed yet (e.g., due to error before 'complete')
+                     // ensure the placeholder is removed or an error message is shown.
+                     if (finalReportContainer.style.display === 'none' && errorContainer.style.display === 'none') {
+                          // If no report and no specific error shown, indicate incomplete process
+                          errorMessageText.textContent = "The research process finished, but the final report could not be generated or displayed.";
+                          errorContainer.style.display = 'block';
+                     }
+                     break;
+             }
+         };
 
-        window.addEventListener('beforeunload', () => {
-            if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-                console.log("Closing EventSource connection on page unload.");
-                eventSource.close();
-            }
-        });
+         eventSource.onerror = function(err) {
+             console.error("EventSource failed:", err);
+             addProgress("Connection error with the research stream. The process might have been interrupted.", true);
+             errorMessageText.textContent = "Lost connection to the server. Please check your network or try starting a new research.";
+             errorContainer.style.display = 'block';
+             eventSource.close();
+             if (progressBar) progressBar.style.display = 'none';
+         };
 
+         // --- Footnote Tooltip Initialization ---
+         function initializeFootnoteTooltips() {
+             // Target the footnote reference links generated by the markdown library
+             // Example selector: a inside sup element with class footnote-ref
+             const footnoteRefs = finalReportHtml.querySelectorAll('.footnote-ref a');
+
+             footnoteRefs.forEach(link => {
+                 const targetId = link.getAttribute('href'); // Should be like '#fn:1'
+                 if (!targetId || !targetId.startsWith('#fn:')) return;
+
+                 const footnoteElement = finalReportHtml.querySelector(targetId); // Find the corresponding li
+                 if (footnoteElement) {
+                     // Extract the source URL (often the first link in the footnote li)
+                     const sourceLink = footnoteElement.querySelector('a[href^="http"]');
+                     let tooltipContent = 'Source info not found.';
+                     if (sourceLink) {
+                         // Make the URL clickable inside the tooltip
+                          tooltipContent = `<a href="${sourceLink.href}" target="_blank" rel="noopener noreferrer">${sourceLink.href}</a>`;
+                     } else {
+                          // Fallback: try to get text content, remove the back-arrow link if present
+                         const backArrow = footnoteElement.querySelector('.footnote-backref');
+                         if(backArrow) backArrow.remove(); // Temporarily remove back-arrow for clean text
+                         tooltipContent = footnoteElement.textContent.trim();
+                          // Add back the arrow if needed for other purposes, though removing is usually fine here
+                     }
+
+                     tippy(link, {
+                         content: tooltipContent,
+                         allowHTML: true, // Allow the link tag in the tooltip
+                         interactive: true, // Allow clicking the link in the tooltip
+                         theme: 'light-border', // Use the custom theme defined in CSS
+                         placement: 'top', // Or 'bottom', 'left', 'right'
+                     });
+                 }
+             });
+         }
+
+     });
     </script>
 </body>
 </html>
