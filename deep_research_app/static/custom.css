@@ -1,0 +1,121 @@
+/* custom.css - Additional styling for the research report */
+
+/* Target the container where the report HTML is injected */
+#report-display {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    border: 1px solid var(--pico-card-border-color); /* Use Pico variable */
+    border-radius: var(--pico-border-radius);
+    background-color: var(--pico-card-background-color); /* Use Pico variable */
+    box-shadow: var(--pico-card-box-shadow);
+}
+
+/* Spacing for headings */
+#report-display h1 {
+    margin-top: 0; /* First heading might not need top margin */
+    margin-bottom: 1.5rem;
+    color: var(--pico-h1-color); /* Ensure consistency */
+}
+
+#report-display h2 {
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    padding-bottom: 0.3rem;
+    color: var(--pico-h2-color);
+}
+
+#report-display h3 {
+    margin-top: 1.75rem;
+    margin-bottom: 0.75rem;
+    color: var(--pico-h3-color);
+}
+
+/* Paragraph styling */
+#report-display p {
+    line-height: 1.65; /* Improve readability */
+    margin-bottom: 1.1rem;
+}
+
+/* List styling (adjust if needed) */
+#report-display ul,
+#report-display ol {
+    margin-left: 1.5rem;
+    margin-bottom: 1.1rem;
+}
+
+#report-display li {
+    margin-bottom: 0.4rem;
+}
+
+
+/* --- Citation Styling & Interactivity --- */
+
+/* Style the superscript citation link */
+#report-display sup a[href^="#fn:"] {
+    display: inline-block; /* Allows padding and background */
+    padding: 0.1em 0.4em;
+    margin: 0 0.1em;
+    background-color: var(--pico-mark-background-color); /* Use mark background color */
+    color: var(--pico-mark-color); /* Use mark text color */
+    border-radius: 3px;
+    text-decoration: none;
+    font-size: 0.8em; /* Slightly smaller than default sup */
+    font-weight: bold;
+    line-height: 1; /* Prevent affecting paragraph line height */
+    vertical-align: super; /* Keep it superscripted */
+    transition: background-color 0.2s ease;
+    cursor: help; /* Indicate interactivity */
+}
+
+/* Hover effect for citation link */
+#report-display sup a[href^="#fn:"]:hover {
+    background-color: var(--pico-ins-background-color);
+    color: var(--pico-ins-color);
+}
+
+/* --- Bibliography Styling --- */
+
+/* Style the entire footnote section */
+#report-display .footnotes {
+    margin-top: 2.5rem;
+    padding-top: 1rem;
+    border-top: 2px solid var(--pico-primary-border);
+    font-size: 0.9em; /* Make bibliography slightly smaller */
+    color: var(--pico-muted-color);
+}
+
+/* Individual bibliography items */
+#report-display .footnotes ol {
+    padding-left: 0; /* Remove default padding if needed */
+    list-style: none; /* Remove default numbering if using target-counter */
+}
+
+#report-display .footnotes li {
+    margin-bottom: 0.6rem;
+    /* Use target-counter to display the number based on the ID */
+    counter-increment: footnote-counter;
+    position: relative;
+    padding-left: 2.5em; /* Space for the counter */
+}
+
+/* Style the generated number using ::before */
+#report-display .footnotes li::before {
+     /* Extract the number from the ID using target-counter */
+    content: "[" target-counter(attr(id, string) s) "]"; /* Note: Simplified selector for browser compatibility */
+    /* A more specific version (might not work everywhere): content: "[" target-counter(attr(id, string) s) "]"; */
+    position: absolute;
+    left: 0;
+    font-weight: bold;
+    color: var(--pico-primary); /* Use primary color for emphasis */
+}
+
+/* Style the back-reference link (arrow) */
+#report-display .footnotes li a[href^="#fnref:"] {
+    margin-left: 0.5em;
+    text-decoration: none;
+    color: var(--pico-secondary);
+}
+#report-display .footnotes li a[href^="#fnref:"]:hover {
+    text-decoration: underline;
+}
