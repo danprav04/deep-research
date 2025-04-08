@@ -3,308 +3,375 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deep Research: {{ topic }}</title>
+    <title>Research Results: {{ topic }}</title>
     <link rel="stylesheet" href="{{ pico_css }}">
-    <!-- Tippy.js for interactive footnotes -->
-    <script src="https://unpkg.com/@popperjs/core@2"></script>
-    <script src="https://unpkg.com/tippy.js@6"></script>
     <style>
-        body { padding-bottom: 5rem; } /* Prevent content hiding behind footer */
-        main { padding-top: 1rem; }
-        #progress-updates { max-height: 300px; overflow-y: auto; background-color: var(--card-background-color); border: 1px solid var(--card-border-color); padding: 1rem; margin-bottom: 1.5rem; border-radius: var(--border-radius); font-size: 0.9em; }
-        #progress-updates p { margin-bottom: 0.5em; }
-        #progress-updates .error { color: var(--pico-color-red-500); font-weight: bold; }
-        #final-report-container article { margin-top: 2rem; padding: 1.5rem; border: 1px solid var(--card-border-color); border-radius: var(--border-radius); background-color: var(--card-background-color); }
-        /* Markdown Styles */
-        #final-report-html h1, #final-report-html h2, #final-report-html h3 { margin-top: 1.5em; margin-bottom: 0.8em; }
-        #final-report-html h1 { border-bottom: 2px solid var(--primary); padding-bottom: 0.3em; }
-        #final-report-html h2 { border-bottom: 1px solid var(--secondary); padding-bottom: 0.2em; }
-        #final-report-html p { line-height: 1.6; }
-        #final-report-html ul, #final-report-html ol { margin-left: 2em; margin-bottom: 1em; }
-        #final-report-html blockquote { border-left: 4px solid var(--muted-border-color); padding-left: 1em; margin-left: 0; color: var(--muted-color); }
-        #final-report-html pre { background-color: var(--code-background-color); padding: 1em; border-radius: var(--border-radius); overflow-x: auto; }
-        #final-report-html code { font-family: var(--font-monospace); background-color: var(--code-background-color); padding: 0.2em 0.4em; border-radius: 3px; }
-        #final-report-html pre code { background-color: transparent; padding: 0; }
-        #final-report-html .footnote-ref a { /* Style the [^1] links */
-            background-color: var(--primary-background); color: var(--primary); padding: 1px 4px; border-radius: 3px; text-decoration: none; font-size: 0.85em; vertical-align: super;
-        }
-        #final-report-html .footnote-ref a:hover { background-color: var(--primary-hover); }
-        #final-report-html .footnotes { margin-top: 2em; padding-top: 1em; border-top: 1px solid var(--muted-border-color); font-size: 0.9em; color: var(--muted-color); }
-        #final-report-html .footnotes ol { margin-left: 1em; }
-        #final-report-html .footnotes li { margin-bottom: 0.5em; }
-        #final-report-html .footnotes p { display: inline; } /* Prevent extra paragraphs in footnotes */
-        /* Tippy.js Tooltip Style */
-        .tippy-box[data-theme~='light-border'] {
-            border: 1px solid var(--primary);
+        body { padding-bottom: 5rem; }
+        main { margin-top: 1rem; }
+        #progressUpdates {
             background-color: var(--card-background-color);
-            color: var(--color);
+            border: 1px solid var(--card-border-color);
+            border-radius: var(--border-radius);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 0.9em;
+            line-height: 1.4;
         }
-        .tippy-box[data-theme~='light-border'][data-placement^='top'] > .tippy-arrow::before { border-top-color: var(--primary); }
-        .tippy-box[data-theme~='light-border'][data-placement^='bottom'] > .tippy-arrow::before { border-bottom-color: var(--primary); }
-        .tippy-box[data-theme~='light-border'][data-placement^='left'] > .tippy-arrow::before { border-left-color: var(--primary); }
-        .tippy-box[data-theme~='light-border'][data-placement^='right'] > .tippy-arrow::before { border-right-color: var(--primary); }
-        .tippy-content { word-break: break-all; } /* Allow long URLs to wrap */
+        #progressUpdates p {
+            margin-bottom: 0.5em;
+            word-wrap: break-word;
+        }
+        #progressUpdates p:last-child {
+            margin-bottom: 0;
+        }
+        .error-message {
+            color: var(--color-invalid);
+            font-weight: bold;
+        }
+        .fatal-error {
+             background-color: var(--color-invalid-background);
+             border-left: 5px solid var(--color-invalid);
+             padding: 0.8rem;
+        }
+        #resultsContainer article {
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            border: 1px solid var(--card-border-color);
+            border-radius: var(--border-radius);
+            background-color: var(--card-background-color);
+        }
+        #reportDisplay h1, #reportDisplay h2, #reportDisplay h3 {
+             margin-top: 1.5em;
+             margin-bottom: 0.8em;
+        }
+        #reportDisplay p {
+            line-height: 1.6;
+        }
+        #reportDisplay .footnote-ref a, #reportDisplay .footnote-backref {
+            text-decoration: none;
+            padding: 0.1em 0.3em;
+            background-color: var(--muted-border-color);
+            border-radius: var(--border-radius);
+            font-weight: bold;
+            color: var(--primary-focus);
+             transition: background-color 0.2s ease;
+        }
+        #reportDisplay .footnote-ref a:hover, #reportDisplay .footnote-backref:hover {
+             background-color: var(--primary-hover);
+             color: var(--primary-inverse);
+        }
+         /* Style for the target footnote when linked */
+        #reportDisplay .footnotes li:target {
+            background-color: var(--mark-background-color);
+            border-left: 3px solid var(--mark-color);
+            padding-left: 0.5rem; /* Adjust as needed */
+            margin-left: -0.8rem; /* Compensate for padding */
+            border-radius: var(--border-radius);
+        }
+        #rawDataDisplay {
+            font-family: monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+            background-color: var(--code-background-color); /* Use code block background */
+            color: var(--code-color); /* Use code text color */
+            padding: 1rem;
+            border-radius: var(--border-radius);
+        }
+        #loadingIndicator { text-align: center; margin: 2rem 0; }
+        #downloadSection { margin-top: 1.5rem; }
+        /* Hide elements initially */
+        #resultsContainer, #downloadSection, #rawDataAccordion { display: none; }
     </style>
 </head>
 <body>
-    <nav class="container-fluid">
-        <ul>
-            <li><a href="/" class="contrast"><strong>Deep Research Assistant</strong></a></li>
-        </ul>
-        <ul>
-            <li>
-                <a href="{{ url_for('index') }}" role="button" class="outline">New Research</a>
-            </li>
-        </ul>
-    </nav>
-
     <main class="container">
-        <section id="topic-section">
-            <h2 style="word-break: break-word;">Researching: {{ topic }}</h2>
-            <a href="{{ url_for('index') }}" role="button" class="secondary outline">← Start New Research</a>
-        </section>
+        <hgroup>
+            <h1>Research Results</h1>
+            <h2>Topic: {{ topic }}</h2>
+        </hgroup>
 
-        <section id="progress-section">
-            <h3>Research Progress</h3>
-            <div id="progress-updates">
-                <p>Initializing research process...</p>
+        <article id="progressCard">
+            <header><strong>Progress Updates</strong></header>
+            <div id="progressUpdates">
+                <p>Connecting to research stream...</p>
             </div>
-            <progress id="progress-bar" style="display: none;"></progress> <!-- Optional: Visual progress bar -->
-        </section>
+            <div id="loadingIndicator">
+                <progress indeterminate></progress>
+                <p>Research in progress...</p>
+            </div>
+        </article>
 
-        <section id="synthesis-output-container" style="display: none;">
-            <h3>Synthesized Information (Live)</h3>
-            <article>
-                <div id="synthesis-output"></div>
+        <section id="resultsContainer">
+             <!-- Synthesis Section -->
+             <details id="synthesisAccordion">
+                <summary><h2>Intermediate Synthesis</h2> (LLM analysis of sources)</summary>
+                <article id="synthesisDisplay">
+                    <p>Waiting for synthesis stream...</p>
+                </article>
+            </details>
+
+            <!-- Final Report Section -->
+            <article id="reportDisplay">
+                <h2>Final Report</h2>
+                <p>Waiting for report generation...</p>
+                <!-- Final HTML report will be injected here -->
             </article>
+
+             <!-- Raw Data Section -->
+             <details id="rawDataAccordion">
+                <summary><h3>Raw Scraped Data Preview</h3></summary>
+                <article>
+                     <pre><code id="rawDataDisplay">(Raw data preview will appear here)</code></pre>
+                </article>
+            </details>
         </section>
 
-        <section id="final-report-container" style="display: none;">
-            <h3>Final Research Report</h3>
-            <form id="download-form" action="{{ url_for('download_docx') }}" method="post" style="margin-bottom: 1rem; display: none;">
-                <input type="hidden" name="markdown_report" id="markdown_report_hidden">
-                <input type="hidden" name="topic" value="{{ topic }}">
-                {# Disable button if conversion not available - handled via JS #}
-                <button type="submit" id="download-docx-button">Download as DOCX</button>
-                <small id="docx-unavailable-msg" style="display: none; color: var(--muted-color); margin-left: 1em;">DOCX download requires the 'html2docx' library on the server.</small>
+        <section id="downloadSection">
+            <h3>Download Report</h3>
+            <form id="downloadForm" action="{{ url_for('download_docx') }}" method="post" style="display: none;">
+                 <input type="hidden" name="markdown_report" id="hiddenMarkdownReport">
+                 <input type="hidden" name="topic" value="{{ topic }}">
+                 <button type="submit" id="downloadDocxButton" disabled>Download as DOCX</button>
+                 <small id="docxError" class="error-message"></small>
+                 <small id="docxUnavailable" style="display: none;"> (DOCX conversion library not installed on server)</small>
             </form>
-            <article>
-                <div id="final-report-html">
-                    <p><i>Final report will be generated here...</i></p>
-                </div>
-            </article>
+            <button id="copyMarkdownButton">Copy Report Markdown</button>
+             <small id="copyStatus" style="display: none; margin-left: 10px;"></small>
         </section>
-
-        <details id="raw-data-preview-container" style="display: none; margin-top: 2rem;">
-            <summary>Raw Scraped Data Preview (Limited)</summary>
-            <h3>Raw Scraped Data Preview (Limited)</h3>
-            <pre><code id="raw-data-content" style="font-size: 0.8em; max-height: 400px; overflow-y: auto; display: block;"></code></pre>
-        </details>
-
-        <div id="error-container" class="container" style="margin-top: 2rem; display: none;">
-             <article class="error-message" style="background-color: var(--pico-form-element-invalid-background-color); border-color: var(--pico-form-element-invalid-border-color); color: var(--pico-form-element-invalid-active-color);">
-                <h4 style="color: inherit;">An Error Occurred</h4>
-                <p id="error-message-text"></p>
-                <button onclick="document.getElementById('error-container').style.display='none'">Dismiss</button>
-            </article>
-        </div>
 
     </main>
 
-    <footer class="container" style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--border-color);">
-        <small>Powered by Google Gemini & Web Research</small>
-    </footer>
-
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-         const encodedTopic = "{{ encoded_topic }}";
-         const progressUpdates = document.getElementById('progress-updates');
-         const progressBar = document.getElementById('progress-bar'); // Optional progress bar
-         const synthesisContainer = document.getElementById('synthesis-output-container');
-         const synthesisOutput = document.getElementById('synthesis-output');
-         const finalReportContainer = document.getElementById('final-report-container');
-         const finalReportHtml = document.getElementById('final-report-html');
-         const downloadForm = document.getElementById('download-form');
-         const markdownReportHidden = document.getElementById('markdown_report_hidden');
-         const downloadDocxButton = document.getElementById('download-docx-button');
-         const docxUnavailableMsg = document.getElementById('docx-unavailable-msg');
-         const rawDataPreviewContainer = document.getElementById('raw-data-preview-container');
-         const rawDataContent = document.getElementById('raw-data-content');
-         const errorContainer = document.getElementById('error-container');
-         const errorMessageText = document.getElementById('error-message-text');
+        const progressUpdates = document.getElementById('progressUpdates');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const synthesisDisplay = document.getElementById('synthesisDisplay');
+        const reportDisplay = document.getElementById('reportDisplay');
+        const rawDataDisplay = document.getElementById('rawDataDisplay');
+        const synthesisAccordion = document.getElementById('synthesisAccordion');
+        const rawDataAccordion = document.getElementById('rawDataAccordion');
+        const downloadSection = document.getElementById('downloadSection');
+        const downloadForm = document.getElementById('downloadForm');
+        const downloadDocxButton = document.getElementById('downloadDocxButton');
+        const hiddenMarkdownReport = document.getElementById('hiddenMarkdownReport');
+        const docxError = document.getElementById('docxError');
+        const docxUnavailable = document.getElementById('docxUnavailable');
+        const copyMarkdownButton = document.getElementById('copyMarkdownButton');
+        const copyStatus = document.getElementById('copyStatus');
 
-         // --- Event Source Setup ---
-         const eventSource = new EventSource(`/stream?topic=${encodedTopic}`);
+        let finalReportMarkdownContent = ""; // Store the final markdown
+        let docxReady = false;
 
-         addProgress("Connecting to research stream...");
+        // --- SSE Connection ---
+        const encodedTopic = "{{ encoded_topic }}"; // Get encoded topic from Flask
+        const eventSource = new EventSource(`/stream?topic=${encodedTopic}`);
 
-         function addProgress(message, isError = false) {
-             const p = document.createElement('p');
-             // Basic sanitization: replace < and > to prevent accidental HTML injection in progress messages
-             p.textContent = message.replace(/</g, "<").replace(/>/g, ">");
-             if (isError) {
-                 p.classList.add('error');
-             }
-             progressUpdates.appendChild(p);
-             // Auto-scroll to the bottom
-             progressUpdates.scrollTop = progressUpdates.scrollHeight;
+        eventSource.onopen = function() {
+            addProgress("Connection established. Starting research...");
+        };
 
-             // Optional: Update progress bar vaguely (e.g., indeterminate)
-             if (progressBar) progressBar.style.display = 'block';
-         }
+        eventSource.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                // console.log("SSE Data:", data); // Debugging
 
-         eventSource.onmessage = function(event) {
-             const data = JSON.parse(event.data);
-             console.log("SSE Event received:", data); // Debug log
+                switch (data.type) {
+                    case 'progress':
+                        addProgress(data.message);
+                        break;
+                    case 'error':
+                        addProgress(`Error: ${data.message}`, true, data.fatal);
+                        if (data.fatal) {
+                            eventSource.close();
+                            loadingIndicator.innerHTML = '<p class="error-message">Research stopped due to fatal error.</p>';
+                        }
+                        break;
+                    case 'stream_start':
+                        if (data.target === 'synthesis') {
+                            synthesisDisplay.innerHTML = ''; // Clear initial message
+                        } else if (data.target === 'report') {
+                            reportDisplay.innerHTML = ''; // Clear initial message
+                        }
+                        break;
+                    case 'llm_chunk':
+                         // Append chunks carefully - Avoid full re-render on each chunk
+                        if (data.target === 'synthesis') {
+                            // For synthesis, simple append might be okay, but could parse markdown later
+                            // Consider using a library like Marked.js if real-time markdown preview is needed
+                             const chunkText = document.createTextNode(data.content);
+                             synthesisDisplay.appendChild(chunkText);
+                             synthesisAccordion.style.display = 'block'; // Show accordion if hidden
+                        } else if (data.target === 'report') {
+                            // For the final report, we append markdown and convert *once* at the end
+                            // For now, just show the raw streaming text - will be replaced by HTML
+                             const chunkText = document.createTextNode(data.content);
+                             reportDisplay.appendChild(chunkText);
+                        }
+                        break;
+                    case 'complete':
+                        resultsContainer.style.display = 'block'; // Show results section
+                        synthesisAccordion.style.display = 'block'; // Ensure synthesis is visible
+                        rawDataAccordion.style.display = 'block'; // Show raw data accordion
 
-             switch (data.type) {
-                 case 'progress':
-                     addProgress(data.message);
-                     break;
+                        // Final Report Display (using HTML from server)
+                        reportDisplay.innerHTML = data.report_html;
+                        finalReportMarkdownContent = data.report_markdown; // Store markdown
+                        hiddenMarkdownReport.value = finalReportMarkdownContent; // Set for form
 
-                 case 'stream_start':
-                     // Show the relevant output container
-                     if (data.target === 'synthesis') {
-                         synthesisContainer.style.display = 'block';
-                         synthesisOutput.innerHTML = ''; // Clear previous content if any
-                         addProgress("Receiving synthesized information stream...");
-                     } else if (data.target === 'report') {
-                         // Clear previous report content if re-running logic allows it
-                         finalReportContainer.style.display = 'block'; // Show container early
-                         finalReportHtml.innerHTML = '<p><i>Generating final report...</i></p>';
-                         downloadForm.style.display = 'none'; // Hide download until ready
-                         addProgress("Receiving final report stream...");
-                     }
-                     break;
+                        // Raw Data Preview
+                        rawDataDisplay.textContent = data.raw_scraped_data_preview || '(No raw data preview available)';
 
-                 case 'llm_chunk':
-                      // Append chunks to the correct target
-                      if (data.target === 'synthesis') {
-                          // Check if the synthesis output container is visible
-                         if (synthesisContainer.style.display !== 'block') {
-                             synthesisContainer.style.display = 'block';
-                             synthesisOutput.innerHTML = ''; // Clear if wasn't visible before
-                         }
-                         // Append content - assuming LLM generates markdown/text
-                         // We don't render markdown live here, just show raw stream
-                          const cleanedChunk = data.content.replace(/</g, "<").replace(/>/g, ">");
-                         synthesisOutput.innerHTML += cleanedChunk; // Append cleaned text chunk
+                        // Download Section
+                        downloadSection.style.display = 'block';
+                        if (data.docx_available) {
+                            downloadForm.style.display = 'inline-block'; // Show form if available
+                            downloadDocxButton.disabled = false;
+                            docxReady = true;
+                        } else {
+                            docxUnavailable.style.display = 'inline'; // Show unavailable message
+                            docxReady = false;
+                        }
 
-                     } else if (data.target === 'report') {
-                         // For the report, we wait for 'complete' to render the full HTML
-                         // We could show raw chunks here too if desired, similar to synthesis:
-                          // if (finalReportHtml.innerHTML.includes('<i>Generating final report...</i>')) {
-                          //     finalReportHtml.innerHTML = ''; // Clear placeholder on first chunk
-                          // }
-                          // finalReportHtml.innerHTML += data.content.replace(/</g, "<").replace(/>/g, ">"); // Append cleaned chunk
-                     }
-                     break;
+                        loadingIndicator.style.display = 'none'; // Hide loading indicator
+                         addProgress("Research process completed.", false); // Final status message
+                        eventSource.close(); // Close connection
+                        break;
+                     case 'stream_terminated':
+                        console.log("Stream terminated by server.");
+                        loadingIndicator.style.display = 'none'; // Hide loading indicator if not already hidden
+                        if (!resultsContainer.style.display || resultsContainer.style.display === 'none') {
+                           addProgress("Stream ended unexpectedly.", true); // Indicate if completion wasn't reached
+                        }
+                        eventSource.close();
+                        break;
+                    default:
+                        console.warn("Received unknown SSE event type:", data.type);
+                }
+            } catch (e) {
+                console.error("Failed to parse SSE message or update UI:", e);
+                addProgress("Error processing update from server.", true);
+            }
+             scrollToBottom(progressUpdates); // Keep progress visible
+        };
 
-                 case 'complete':
-                     finalReportContainer.style.display = 'block';
-                     finalReportHtml.innerHTML = data.report_html; // Render final HTML
-                     markdownReportHidden.value = data.report_markdown; // Store raw markdown for download
-                     // Enable/disable DOCX download based on server flag
-                     if (data.docx_available) {
-                         downloadDocxButton.disabled = false;
-                         downloadForm.style.display = 'inline-block'; // Show form
-                         docxUnavailableMsg.style.display = 'none';
-                     } else {
-                         downloadDocxButton.disabled = true;
-                          downloadForm.style.display = 'inline-block'; // Still show the form area
-                         downloadDocxButton.style.display = 'none'; // Hide the button itself
-                         docxUnavailableMsg.style.display = 'inline'; // Show explanation
-                     }
+        eventSource.onerror = function(err) {
+            console.error("EventSource failed:", err);
+            addProgress("Connection to research stream lost or failed.", true);
+            loadingIndicator.innerHTML = '<p class="error-message">Connection Error. Please try again.</p>';
+            eventSource.close();
+        };
 
-                     // Show raw data preview
-                     rawDataPreviewContainer.style.display = 'block';
-                     rawDataContent.textContent = data.raw_scraped_data_preview;
-
-                     // Initialize Tippy.js for footnote tooltips *after* content is rendered
-                     initializeFootnoteTooltips();
-
-                     addProgress("Processing complete. Report generated.");
-                     if (progressBar) progressBar.style.display = 'none'; // Hide progress bar
-                     break;
-
-                 case 'error':
-                     addProgress(`ERROR: ${data.message}`, true);
-                     // Show dedicated error message area
-                     errorMessageText.textContent = data.message;
-                     errorContainer.style.display = 'block';
-                     if (data.fatal) {
-                         addProgress("A fatal error occurred. Stopping process.", true);
-                         eventSource.close(); // Stop listening on fatal errors
-                         if (progressBar) progressBar.style.display = 'none';
-                     }
-                     break;
-
-                 case 'stream_terminated':
-                     addProgress("Server stream finished.");
-                     eventSource.close();
-                     if (progressBar) {
-                          // Set progress bar to 100% or hide it
-                          progressBar.removeAttribute('value'); // Make it indeterminate if needed, or hide
-                          progressBar.style.display = 'none';
-                     }
-                     // If the report hasn't been displayed yet (e.g., due to error before 'complete')
-                     // ensure the placeholder is removed or an error message is shown.
-                     if (finalReportContainer.style.display === 'none' && errorContainer.style.display === 'none') {
-                          // If no report and no specific error shown, indicate incomplete process
-                          errorMessageText.textContent = "The research process finished, but the final report could not be generated or displayed.";
-                          errorContainer.style.display = 'block';
-                     }
-                     break;
-             }
-         };
-
-         eventSource.onerror = function(err) {
-             console.error("EventSource failed:", err);
-             addProgress("Connection error with the research stream. The process might have been interrupted.", true);
-             errorMessageText.textContent = "Lost connection to the server. Please check your network or try starting a new research.";
-             errorContainer.style.display = 'block';
-             eventSource.close();
-             if (progressBar) progressBar.style.display = 'none';
-         };
-
-         // --- Footnote Tooltip Initialization ---
-         function initializeFootnoteTooltips() {
-             // Target the footnote reference links generated by the markdown library
-             // Example selector: a inside sup element with class footnote-ref
-             const footnoteRefs = finalReportHtml.querySelectorAll('.footnote-ref a');
-
-             footnoteRefs.forEach(link => {
-                 const targetId = link.getAttribute('href'); // Should be like '#fn:1'
-                 if (!targetId || !targetId.startsWith('#fn:')) return;
-
-                 const footnoteElement = finalReportHtml.querySelector(targetId); // Find the corresponding li
-                 if (footnoteElement) {
-                     // Extract the source URL (often the first link in the footnote li)
-                     const sourceLink = footnoteElement.querySelector('a[href^="http"]');
-                     let tooltipContent = 'Source info not found.';
-                     if (sourceLink) {
-                         // Make the URL clickable inside the tooltip
-                          tooltipContent = `<a href="${sourceLink.href}" target="_blank" rel="noopener noreferrer">${sourceLink.href}</a>`;
-                     } else {
-                          // Fallback: try to get text content, remove the back-arrow link if present
-                         const backArrow = footnoteElement.querySelector('.footnote-backref');
-                         if(backArrow) backArrow.remove(); // Temporarily remove back-arrow for clean text
-                         tooltipContent = footnoteElement.textContent.trim();
-                          // Add back the arrow if needed for other purposes, though removing is usually fine here
-                     }
-
-                     tippy(link, {
-                         content: tooltipContent,
-                         allowHTML: true, // Allow the link tag in the tooltip
-                         interactive: true, // Allow clicking the link in the tooltip
-                         theme: 'light-border', // Use the custom theme defined in CSS
-                         placement: 'top', // Or 'bottom', 'left', 'right'
-                     });
+        // --- Helper Functions ---
+        function addProgress(message, isError = false, isFatal = false) {
+            const p = document.createElement('p');
+            p.textContent = message;
+            if (isError) {
+                p.classList.add('error-message');
+                 if (isFatal) {
+                     p.classList.add('fatal-error'); // Add specific class for fatal errors
                  }
-             });
+            }
+            progressUpdates.appendChild(p);
+            scrollToBottom(progressUpdates); // Scroll down
+        }
+
+        function scrollToBottom(element) {
+             // Only scroll if user isn't scrolled up
+             if (element.scrollHeight - element.scrollTop <= element.clientHeight + 50) {
+                 element.scrollTop = element.scrollHeight;
+             }
+        }
+
+         // --- Interactive Footnotes ---
+         // Use event delegation on the report display area
+         reportDisplay.addEventListener('click', function(event) {
+             const target = event.target;
+
+             // Check if the click is on a footnote reference link (e.g., [^1])
+             if (target.matches('.footnote-ref a') || target.closest('.footnote-ref a')) {
+                 event.preventDefault(); // Prevent default jump
+                 const link = target.closest('.footnote-ref a');
+                 const targetId = link.getAttribute('href'); // Should be like #fn1
+                 const footnoteElement = document.querySelector(targetId);
+                 if (footnoteElement) {
+                     footnoteElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                     // Optional: Add temporary highlight (handled by CSS :target)
+                 }
+             }
+             // Check if the click is on a footnote back reference link (e.g., ↩)
+             else if (target.matches('.footnote-backref') || target.closest('.footnote-backref')) {
+                  event.preventDefault(); // Prevent default jump
+                  const link = target.closest('.footnote-backref');
+                  const targetId = link.getAttribute('href'); // Should be like #fnref1
+                  const refElement = document.querySelector(targetId);
+                  if (refElement) {
+                       refElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+             }
+         });
+
+
+        // --- Download & Copy Buttons ---
+        downloadForm.addEventListener('submit', function(e) {
+            if (!docxReady) {
+                e.preventDefault(); // Prevent submission if DOCX not available/ready
+                docxError.textContent = 'DOCX generation is not available.';
+                return;
+            }
+            // Add a small delay or loading indicator if needed
+            downloadDocxButton.textContent = 'Preparing...';
+            downloadDocxButton.disabled = true;
+             // Reset button after a short delay allows download to initiate
+             setTimeout(() => {
+                 downloadDocxButton.textContent = 'Download as DOCX';
+                 downloadDocxButton.disabled = false;
+             }, 3000);
+        });
+
+         copyMarkdownButton.addEventListener('click', async () => {
+             if (!finalReportMarkdownContent) {
+                 showCopyStatus('No report content available to copy.', true);
+                 return;
+             }
+             try {
+                 await navigator.clipboard.writeText(finalReportMarkdownContent);
+                 showCopyStatus('Markdown copied to clipboard!', false);
+             } catch (err) {
+                 console.error('Failed to copy markdown: ', err);
+                 showCopyStatus('Failed to copy. See console for details.', true);
+                 // Fallback for older browsers (less reliable)
+                 try {
+                     const textArea = document.createElement("textarea");
+                     textArea.value = finalReportMarkdownContent;
+                     textArea.style.position = "fixed"; // Avoid scrolling
+                     textArea.style.left = "-9999px";
+                     document.body.appendChild(textArea);
+                     textArea.focus();
+                     textArea.select();
+                     document.execCommand('copy');
+                     document.body.removeChild(textArea);
+                     showCopyStatus('Markdown copied (fallback method)!', false);
+                 } catch (fallbackErr) {
+                    console.error('Fallback copy failed: ', fallbackErr);
+                     showCopyStatus('Copy failed. Manual copy needed.', true);
+                 }
+             }
+         });
+
+         function showCopyStatus(message, isError = false) {
+             copyStatus.textContent = message;
+             copyStatus.style.color = isError ? 'var(--color-invalid)' : 'var(--color-valid)';
+             copyStatus.style.display = 'inline';
+             setTimeout(() => {
+                 copyStatus.style.display = 'none';
+             }, 3000); // Hide after 3 seconds
          }
 
-     });
     </script>
 </body>
 </html>

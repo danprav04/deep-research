@@ -22,16 +22,15 @@ from llm_interface import call_gemini, stream_gemini
 from web_research import perform_web_search, scrape_url
 from utils import (
     parse_research_plan, generate_bibliography_map,
-    convert_markdown_to_html, convert_html_to_docx
+    convert_markdown_to_html, convert_html_to_docx,
+    DOCX_CONVERSION_AVAILABLE # Import the flag from utils
 )
 
 # --- Check for Optional Dependencies ---
-DOCX_CONVERSION_AVAILABLE = False
-try:
-    import html2docx
-    DOCX_CONVERSION_AVAILABLE = True
+# This check is now primarily done in utils.py and the flag is imported
+if DOCX_CONVERSION_AVAILABLE:
     print("INFO: 'html2docx' library found. DOCX download will be available.")
-except ImportError:
+else:
     print("WARN: 'html2docx' library not found. DOCX download will be disabled.")
     print("      Install it using: pip install html2docx")
 
@@ -41,13 +40,14 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24) # Used for session management if needed, good practice
 
 # --- Initialize Google Generative AI Client ---
+# (Keep existing initialization code)
 if not config.GOOGLE_API_KEY:
-    raise ValueError("FATAL: GOOGLE_API_KEY environment variable not set in .env or environment.")
+     raise ValueError("FATAL: GOOGLE_API_KEY environment variable not set in .env or environment.")
 try:
-    genai.configure(api_key=config.GOOGLE_API_KEY)
-    print(f"INFO: Google Generative AI configured with model: {config.GOOGLE_MODEL_NAME}")
+     genai.configure(api_key=config.GOOGLE_API_KEY)
+     print(f"INFO: Google Generative AI configured with model: {config.GOOGLE_MODEL_NAME}")
 except Exception as e:
-    raise RuntimeError(f"FATAL: Failed to configure Google Generative AI: {e}")
+     raise RuntimeError(f"FATAL: Failed to configure Google Generative AI: {e}")
 
 
 # --- Flask Routes ---
@@ -62,26 +62,27 @@ def research_start():
     """Redirects to the results page which connects to the SSE stream."""
     topic = request.form.get('topic', '').strip()
     if not topic:
-        # Handle empty topic submission gracefully (e.g., redirect back with message)
-        # For simplicity, redirecting to index. Could add flash message.
         return redirect(url_for('index'))
-    # Encode the topic safely for use in URL query parameters
     encoded_topic = quote(topic)
-    return render_template('results.html', topic=topic, encoded_topic=encoded_topic, pico_css=config.PICO_CSS_CDN)
+    # Pass topic, encoded_topic and css link to results.html
+    return render_template('results.html',
+                           topic=topic,
+                           encoded_topic=encoded_topic,
+                           pico_css=config.PICO_CSS_CDN)
 
 @app.route('/stream')
 def stream():
     """The main SSE route that performs research and streams progress."""
     encoded_topic = request.args.get('topic', '')
-    topic = unquote(encoded_topic) # Decode topic from URL
+    topic = unquote(encoded_topic)
     if not topic:
-        topic = "Default Topic - No Topic Provided" # Fallback if decoding fails or empty
+        topic = "Default Topic - No Topic Provided"
 
     def generate_updates():
         # --- Research state variables ---
         scraped_sources_list = []
         research_plan = []
-        accumulated_synthesis = ""
+        accumulated_synthesis_md = "" # Store markdown directly
         final_report_markdown = ""
         url_to_index_map = {}
         start_time_total = time.time()
@@ -94,22 +95,22 @@ def stream():
                 yield f"data: {payload}\n\n"
             except TypeError as e:
                 print(f"Error serializing data for SSE: {e}. Data: {data}")
-                # Attempt to send a safe error message back
                 try:
                     safe_data = {'type': data.get('type', 'error'), 'message': f"Serialization Error: {e}"}
                     payload = json.dumps(safe_data)
                     yield f"data: {payload}\n\n"
-                except Exception: # Fallback if even error serialization fails
+                except Exception:
                     yield "data: {\"type\": \"error\", \"message\": \"Internal server error during SSE event serialization.\"}\n\n"
 
-        def send_progress(message):
-            """Sends a progress update event."""
-            yield from send_event({'type': 'progress', 'message': message})
+        def send_progress(message, is_error=False, is_fatal=False):
+            """Sends a progress or error update event."""
+            event_type = 'error' if is_error else 'progress'
+            event_data = {'type': event_type, 'message': message}
+            if is_error:
+                print(f"{'FATAL ' if is_fatal else ''}ERROR (SSE Stream): {message}")
+                event_data['fatal'] = is_fatal
+            yield from send_event(event_data)
 
-        def send_error_event(message, is_fatal=False):
-            """Sends an error event and prints to server log."""
-            print(f"ERROR (SSE Stream): {message}")
-            yield from send_event({'type': 'error', 'message': message, 'fatal': is_fatal})
 
         # --- Main Research Workflow ---
         try:
@@ -132,23 +133,20 @@ def stream():
             """
             try:
                 plan_response = call_gemini(plan_prompt)
+                research_plan = parse_research_plan(plan_response)
             except Exception as e:
-                 yield from send_error_event(f"Failed to generate research plan from LLM: {e}", is_fatal=True)
-                 return # Stop processing if plan generation fails
+                 yield from send_progress(f"Failed to generate research plan from LLM: {e}", is_error=True, is_fatal=True)
+                 return
 
-            research_plan = parse_research_plan(plan_response)
-
-            # Check if parsing failed or returned the failure indicator
-            # Use 'step' key consistent with utils.py change
             if not research_plan or (len(research_plan) == 1 and research_plan[0]["step"].startswith("Failed")):
                  fail_reason = research_plan[0]["step"] if research_plan else "Could not parse plan."
                  raw_snippet = f" Raw LLM Response Snippet: '{plan_response[:150]}...'" if plan_response else " (LLM Response was empty)"
-                 yield from send_error_event(f"Failed to create/parse research plan. Reason: {fail_reason}.{raw_snippet}", is_fatal=True)
+                 yield from send_progress(f"Failed to create/parse research plan. Reason: {fail_reason}.{raw_snippet}", is_error=True, is_fatal=True)
                  return
 
             yield from send_progress(f"Generated {len(research_plan)} step plan.")
             for i, step in enumerate(research_plan):
-                 yield from send_progress(f"  Step {i+1}: {step['step']} (Keywords: {step['keywords']})") # Use 'step' key
+                 yield from send_progress(f"  Step {i+1}: {step['step']} (Keywords: {step['keywords']})")
 
 
             # === Step 2a: Search and Collect URLs ===
@@ -159,8 +157,8 @@ def stream():
             total_search_queries = 0
 
             for i, step in enumerate(research_plan):
-                step_desc = step.get('step', f'Unnamed Step {i+1}') # Use 'step' key
-                keywords = step.get('keywords', []) # 'keywords' key is correct
+                step_desc = step.get('step', f'Unnamed Step {i+1}')
+                keywords = step.get('keywords', [])
 
                 yield from send_progress(f"Searching - Step {i+1}/{len(research_plan)}: '{step_desc[:70]}{'...' if len(step_desc)>70 else ''}'")
                 if not keywords:
@@ -172,14 +170,14 @@ def stream():
 
                 if step_errors:
                     total_search_errors += len(step_errors)
-                    for err in step_errors: yield from send_progress(f"    -> Search Warning: {err}") # Report non-fatal search errors
+                    for err in step_errors: yield from send_progress(f"    -> Search Warning: {err}", is_error=True) # Report non-fatal search errors
 
                 new_urls_count = len(set(step_urls) - all_urls_from_search_step)
                 all_urls_from_search_step.update(step_urls)
                 yield from send_progress(f"  -> Found {len(step_urls)} URLs for step, {new_urls_count} new. Total unique: {len(all_urls_from_search_step)}.")
 
                 if i < len(research_plan) - 1:
-                    time.sleep(config.INTER_SEARCH_DELAY_SECONDS) # Delay between step searches
+                    time.sleep(config.INTER_SEARCH_DELAY_SECONDS)
 
             search_duration = time.time() - start_search_time
             yield from send_progress(f"Search phase completed in {search_duration:.2f}s.")
@@ -187,26 +185,27 @@ def stream():
 
             # Filter URLs
             urls_to_scrape_list = []
+            # (Keep existing URL filtering logic)
             for url in sorted(list(all_urls_from_search_step)):
                  if len(urls_to_scrape_list) >= config.MAX_TOTAL_URLS_TO_SCRAPE:
                       yield from send_progress(f"  -> Reached URL limit ({config.MAX_TOTAL_URLS_TO_SCRAPE}).")
                       break
-                 # Basic filtering (can be expanded)
                  is_file = url.lower().split('?')[0].split('#')[0].endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx', '.webp', '.svg', '.xml', '.css', '.js', '.jpeg', '.doc', '.xls', '.ppt', '.txt', '.exe', '.dmg', '.iso', '.rar'))
                  is_mailto = url.lower().startswith('mailto:')
                  is_javascript = url.lower().startswith('javascript:')
                  is_ftp = url.lower().startswith('ftp:')
                  is_tel = url.lower().startswith('tel:')
-                 is_local = url.lower().startswith(('file:', 'localhost', '127.0.0.1')) # Avoid local paths
+                 is_local = url.lower().startswith(('file:', 'localhost', '127.0.0.1'))
                  is_valid_http = url.startswith(('http://', 'https://'))
 
                  if is_valid_http and not any([is_file, is_mailto, is_javascript, is_ftp, is_tel, is_local]):
                       urls_to_scrape_list.append(url)
 
+
             yield from send_progress(f"Selected {len(urls_to_scrape_list)} URLs for scraping (limit: {config.MAX_TOTAL_URLS_TO_SCRAPE}).")
 
             if not urls_to_scrape_list:
-                 yield from send_error_event("No suitable URLs found to scrape after search and filtering.", is_fatal=True)
+                 yield from send_progress("No suitable URLs found to scrape after search and filtering.", is_error=True, is_fatal=True)
                  return
 
 
@@ -222,13 +221,12 @@ def stream():
                     url = future_to_url[future]
                     processed_scrape_count += 1
                     try:
-                        result_dict = future.result() # Result is {'url': url, 'content': text} or None
+                        result_dict = future.result()
                         if result_dict:
                             scraped_sources_list.append(result_dict)
                     except Exception as exc:
-                        yield from send_progress(f"    -> Scrape Error for {url[:60]}...: {exc}") # Log specific future error
+                        yield from send_progress(f"    -> Scrape Error for {url[:60]}...: {exc}", is_error=True) # Log specific future error
 
-                    # Send progress update periodically
                     if processed_scrape_count % 5 == 0 or processed_scrape_count == len(urls_to_scrape_list):
                           progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_list)
                           yield from send_progress(f"  -> Scraping: {processed_scrape_count}/{len(urls_to_scrape_list)} ({progress_perc}%). Success: {len(scraped_sources_list)}")
@@ -237,10 +235,9 @@ def stream():
             yield from send_progress(f"Scraping finished in {scrape_duration:.2f}s. Successfully scraped {len(scraped_sources_list)}/{len(urls_to_scrape_list)} URLs.")
 
             if not scraped_sources_list:
-                yield from send_error_event("Failed to scrape any content successfully.", is_fatal=True)
+                yield from send_progress("Failed to scrape any content successfully.", is_error=True, is_fatal=True)
                 return
 
-            # Ensure order matches original scrape list if needed (useful for consistent bibliography)
             scraped_url_map = {item['url']: item for item in scraped_sources_list}
             ordered_scraped_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
             scraped_sources_list = ordered_scraped_list
@@ -253,21 +250,20 @@ def stream():
 
             # === Step 4: Synthesize Information (Streaming) ===
             yield from send_progress(f"Synthesizing information using {config.GOOGLE_MODEL_NAME}...")
-            yield from send_event({'type': 'stream_start', 'target': 'synthesis'}) # Signal UI to start displaying synthesis stream
+            yield from send_event({'type': 'stream_start', 'target': 'synthesis'})
 
-            # Prepare context, respecting estimated token limits
             context_for_llm_structured = []
             current_chars = 0
             sources_included_count = 0
+            # (Keep context limiting logic)
             for source in scraped_sources_list:
-                 # Estimate size: URL length + content length + some overhead
                  source_len = len(source.get('url', '')) + len(source.get('content', '')) + 50
                  if current_chars + source_len <= config.MAX_CONTEXT_CHARS:
                      context_for_llm_structured.append(source)
                      current_chars += source_len
                      sources_included_count += 1
                  else:
-                     yield from send_progress(f"  -> Warning: Context limit reached. Using first {sources_included_count}/{len(scraped_sources_list)} sources for synthesis.")
+                     yield from send_progress(f"  -> Warning: Context limit reached. Using first {sources_included_count}/{len(scraped_sources_list)} sources for synthesis.", is_error=True)
                      break
 
             estimated_tokens = current_chars / config.CHARS_PER_TOKEN_ESTIMATE
@@ -289,54 +285,52 @@ def stream():
             Instructions:
             1. Address each plan step sequentially.
             2. Find relevant information for each step across ALL sources.
-            3. Synthesize findings concisely.
+            3. Synthesize findings concisely in **Markdown format**. Use headings (`### Step X:`), lists, bold, etc. for clarity.
             4. **MANDATORY CITATION**: Immediately after ANY information from a source, cite it using the exact format: `[Source URL: <full_url_here>]`. Cite every distinct piece of info.
-            5. If no info found for a step, state: "No specific information found for this step."
-            6. Use Markdown for structure (`### Step X: ...`).
-            7. Output ONLY the synthesis, structured by plan steps. NO intro/conclusion/summary/bibliography here. Separate steps with `---`.
+            5. If no info found for a step, state: "No specific information found for this step." under the relevant heading.
+            6. Output ONLY the synthesis, structured by plan steps. NO intro/conclusion/summary/bibliography here. Separate steps with `---`.
             """
-            accumulated_synthesis = ""
+            accumulated_synthesis_md = "" # Store raw markdown from synthesis
             synthesis_stream_error = None
             try:
                 stream_generator = stream_gemini(synthesis_prompt)
                 for result in stream_generator:
                     if result['type'] == 'chunk':
+                        # Send raw markdown chunk for intermediate display
                         yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'synthesis'})
-                        accumulated_synthesis += result['content']
+                        accumulated_synthesis_md += result['content']
                     elif result['type'] == 'stream_error':
                         synthesis_stream_error = result['message']
-                        # Send error, but don't make it fatal unless it's API key/quota
-                        is_fatal_synthesis_err = "API key" in synthesis_stream_error or "quota" in synthesis_stream_error.lower()
-                        yield from send_error_event(f"LLM stream error during synthesis: {synthesis_stream_error}", is_fatal=is_fatal_synthesis_err)
-                        if is_fatal_synthesis_err: return # Stop if fatal API key/quota error
-                        break # Break loop on non-fatal stream error, report generation will proceed
+                        is_fatal_err = "API key" in synthesis_stream_error or "quota" in synthesis_stream_error.lower()
+                        yield from send_progress(f"LLM stream error during synthesis: {synthesis_stream_error}", is_error=True, is_fatal=is_fatal_err)
+                        if is_fatal_err: return
+                        break
                     elif result['type'] == 'stream_warning':
-                         yield from send_progress(f"LLM Stream Warning (Synthesis): {result['message']}") # Log warnings
+                         yield from send_progress(f"LLM Stream Warning (Synthesis): {result['message']}", is_error=True)
                     elif result['type'] == 'stream_end':
-                         break # Normal stream end
+                         break
             except Exception as e:
-                 yield from send_error_event(f"Fatal error processing LLM synthesis stream: {e}", is_fatal=True)
+                 yield from send_progress(f"Fatal error processing LLM synthesis stream: {e}", is_error=True, is_fatal=True)
                  traceback.print_exc()
-                 return # Stop processing
+                 return
 
             yield from send_progress("Synthesis generation finished.")
-            if not accumulated_synthesis.strip() and not synthesis_stream_error:
-                 yield from send_progress("Warning: Synthesis resulted in empty content.")
+            if not accumulated_synthesis_md.strip() and not synthesis_stream_error:
+                 yield from send_progress("Warning: Synthesis resulted in empty content.", is_error=True)
 
 
             # === Step 5: Generate Final Report (Streaming) ===
             yield from send_progress(f"Generating final report using {config.GOOGLE_MODEL_NAME}...")
-            yield from send_event({'type': 'stream_start', 'target': 'report'}) # Signal UI for report stream
+            yield from send_event({'type': 'stream_start', 'target': 'report'})
 
-            # Prepare inputs, handle potential truncation if synthesis is very large
+            # (Keep truncation logic for report prompt)
             report_prompt_components_base_size = len(topic) + len(json.dumps(research_plan)) + len(bibliography_prompt_list)
             available_chars_for_synthesis = config.MAX_CONTEXT_CHARS - report_prompt_components_base_size - 2000 # Safety buffer
-
-            if len(accumulated_synthesis) > available_chars_for_synthesis:
-                yield from send_progress(f"  -> Warning: Synthesis text potentially too large for report prompt, truncating.")
-                truncated_synthesis = accumulated_synthesis[:available_chars_for_synthesis] + "\n\n... [Synthesis truncated due to context limits]"
+            if len(accumulated_synthesis_md) > available_chars_for_synthesis:
+                yield from send_progress(f"  -> Warning: Synthesis text potentially too large for report prompt, truncating.", is_error=True)
+                truncated_synthesis_md = accumulated_synthesis_md[:available_chars_for_synthesis] + "\n\n... [Synthesis truncated due to context limits]"
             else:
-                truncated_synthesis = accumulated_synthesis
+                truncated_synthesis_md = accumulated_synthesis_md
 
             report_prompt = f"""
             Create a comprehensive Markdown research report on "{topic}".
@@ -346,9 +340,9 @@ def stream():
                ```json
                {json.dumps(research_plan, indent=2)}
                ```
-            2. Synthesized Information (with raw URL citations):
+            2. Synthesized Information (Markdown format, with raw URL citations):
                ```markdown
-               {truncated_synthesis if truncated_synthesis.strip() else "No synthesized information was generated or provided."}
+               {truncated_synthesis_md if truncated_synthesis_md.strip() else "No synthesized information was generated or provided."}
                ```
             3. Bibliography Map (URL -> Reference Number):
                ```
@@ -356,76 +350,77 @@ def stream():
                ```
 
             Instructions:
-            1. Write a final report in **well-formatted Markdown** with sections: `# Research Report: {topic}`, `## Introduction`, `## Findings`, `## Conclusion`, `## Bibliography`. Use headings, lists, bold, italics where appropriate.
+            1. Write a final report in **well-formatted Markdown**. Use sections: `# Research Report: {topic}`, `## Introduction`, `## Findings`, `## Conclusion`, `## Bibliography`. Use headings (`##`, `###`), lists, bold, italics appropriately. Ensure good paragraph structure.
             2. **Introduction**: Introduce "{topic}", state the report's purpose, and briefly outline the research plan steps.
             3. **Findings**: Organize by plan step (`### Step X: <Description>`). Integrate the synthesized information for each step. If synthesis was empty or missing for a step, state that clearly.
-            4. **CRITICAL CITATION REPLACEMENT**: Find EVERY occurrence of `[Source URL: <full_url_here>]` in the synthesized text. Replace it with the corresponding Markdown footnote `[^N]`, where N is the number associated with `<full_url_here>` in the Bibliography Map. If a URL in a citation tag is NOT found in the Bibliography Map, OMIT the citation marker entirely for that instance.
+            4. **CRITICAL CITATION REPLACEMENT**: Find EVERY occurrence of `[Source URL: <full_url_here>]` in the synthesized text. Replace it with the corresponding Markdown footnote reference `[^N]`, where N is the number associated with `<full_url_here>` in the Bibliography Map. If a URL in a citation tag is NOT found in the Bibliography Map, OMIT the citation marker entirely for that instance.
             5. **Conclusion**: Summarize key findings (or lack thereof). Mention limitations (e.g., number of sources, potential scraping gaps, empty synthesis). Suggest further research if appropriate.
-            6. **Bibliography**: List all sources from the Bibliography Map numerically using Markdown footnote definition format: `[^N]: <full_url_here>`. If the map is empty, state "No sources cited."
-            7. Output ONLY the complete Markdown report. No extra text before or after.
+            6. **Bibliography**: List all sources from the Bibliography Map numerically using Markdown footnote definition format: `[^N]: <full_url_here>`. Each definition MUST be on its own line. If the map is empty, state "No sources cited." under the Bibliography heading.
+            7. Output ONLY the complete Markdown report. No extra text before or after. Ensure proper Markdown syntax for footnotes.
             """
 
-            final_report_markdown = ""
+            final_report_markdown = "" # Store the final markdown report
             report_stream_error = None
             try:
                 stream_generator = stream_gemini(report_prompt)
                 for result in stream_generator:
                     if result['type'] == 'chunk':
+                         # Send raw markdown chunk for intermediate display
                         yield from send_event({'type': 'llm_chunk', 'content': result['content'], 'target': 'report'})
                         final_report_markdown += result['content']
                     elif result['type'] == 'stream_error':
                         report_stream_error = result['message']
-                        is_fatal_report_err = "API key" in report_stream_error or "quota" in report_stream_error.lower()
-                        yield from send_error_event(f"LLM stream error during report generation: {report_stream_error}", is_fatal=is_fatal_report_err)
-                        if is_fatal_report_err: return
-                        break # Break on non-fatal stream error
+                        is_fatal_err = "API key" in report_stream_error or "quota" in report_stream_error.lower()
+                        yield from send_progress(f"LLM stream error during report generation: {report_stream_error}", is_error=True, is_fatal=is_fatal_err)
+                        if is_fatal_err: return
+                        break
                     elif result['type'] == 'stream_warning':
-                         yield from send_progress(f"LLM Stream Warning (Report): {result['message']}")
+                         yield from send_progress(f"LLM Stream Warning (Report): {result['message']}", is_error=True)
                     elif result['type'] == 'stream_end':
-                         break # Normal end
+                         break
             except Exception as e:
-                 yield from send_error_event(f"Fatal error processing LLM report stream: {e}", is_fatal=True)
+                 yield from send_progress(f"Fatal error processing LLM report stream: {e}", is_error=True, is_fatal=True)
                  traceback.print_exc()
                  return
 
             yield from send_progress("Report generation finished.")
             if not final_report_markdown.strip():
-                 yield from send_progress("Warning: Final report content is empty.")
-                 # Create a placeholder if completely empty
+                 yield from send_progress("Warning: Final report content is empty.", is_error=True)
                  final_report_markdown = f"# Research Report: {topic}\n\n*Report generation failed or produced no content.*"
 
 
             # === Step 6: Final Processing and Completion ===
             yield from send_progress("Processing final report for display...")
 
-            # Convert final Markdown to HTML for display
+            # Convert final Markdown to HTML using the utility
+            # This will handle footnotes correctly if markdown is formatted properly
             report_html = convert_markdown_to_html(final_report_markdown)
 
-            # Prepare raw data preview (limited size)
+            # (Keep raw data preview logic)
             preview_limit_chars = 3000
             raw_data_preview_list = []
             current_preview_len = 0
             for src in scraped_sources_list:
-                # Use compact JSON for preview to save space
                 src_dump = json.dumps(src, separators=(',', ':'), ensure_ascii=False)
                 if current_preview_len + len(src_dump) < preview_limit_chars:
                     raw_data_preview_list.append(src_dump)
                     current_preview_len += len(src_dump)
                 else:
-                    break # Stop adding if preview limit exceeded
+                    break
             raw_data_preview = "[\n  " + ",\n  ".join(raw_data_preview_list) + "\n]"
             if len(scraped_sources_list) > len(raw_data_preview_list):
                  raw_data_preview += f"\n... ({len(raw_data_preview_list)}/{len(scraped_sources_list)} sources shown due to preview size limit)"
             elif not scraped_sources_list:
                  raw_data_preview = "[] (No sources scraped)"
 
+
             # Send final data package to the client
             final_data = {
                 'type': 'complete',
-                'report_html': report_html,
-                'report_markdown': final_report_markdown,
+                'report_html': report_html, # Send the converted HTML
+                'report_markdown': final_report_markdown, # Send raw markdown for copy/download base
                 'raw_scraped_data_preview': raw_data_preview,
-                'docx_available': DOCX_CONVERSION_AVAILABLE # Use the flag set at startup
+                'docx_available': DOCX_CONVERSION_AVAILABLE # Use the imported flag
             }
             yield from send_event(final_data)
 
@@ -433,13 +428,12 @@ def stream():
             yield from send_progress(f"Research process completed successfully in {end_time_total - start_time_total:.2f} seconds.")
 
         except Exception as e:
-            # Catch any unexpected errors in the main workflow
             print(f"FATAL: An unexpected error occurred during stream generation:")
-            traceback.print_exc() # Print full traceback to server logs
+            traceback.print_exc()
             error_msg = f"Unexpected server error: {type(e).__name__} - {escape(str(e))}"
-            yield from send_error_event(error_msg, is_fatal=True)
+            # Use the send_progress helper for errors
+            yield from send_progress(error_msg, is_error=True, is_fatal=True)
         finally:
-             # Signal that the stream is definitively finished, regardless of success/error
              yield from send_event({'type': 'stream_terminated'})
 
 
@@ -447,7 +441,7 @@ def stream():
     headers = {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no', # Important for Nginx buffering
+        'X-Accel-Buffering': 'no',
         'Connection': 'keep-alive'
     }
     return Response(stream_with_context(generate_updates()), headers=headers)
@@ -456,29 +450,35 @@ def stream():
 @app.route('/download_docx', methods=['POST'])
 def download_docx():
     """Converts the received Markdown report to DOCX and sends it as a download."""
-    if not DOCX_CONVERSION_AVAILABLE:
+    if not DOCX_CONVERSION_AVAILABLE: # Use the imported flag
         print("Error [/download_docx]: Attempted download when DOCX conversion is unavailable.")
         return jsonify({"success": False, "message": "DOCX download failed: 'html2docx' library not installed or loaded."}), 400
 
     markdown_content = request.form.get('markdown_report')
-    topic = request.form.get('topic', 'Research_Report') # Get topic for filename
+    topic = request.form.get('topic', 'Research_Report')
 
     if not markdown_content:
         print("Error [/download_docx]: No Markdown content received.")
         return jsonify({"success": False, "message": "Error: No report content received for DOCX conversion."}), 400
 
     try:
-        # 1. Convert Markdown to HTML (required by html2docx)
+        # 1. Convert Markdown to HTML (using the same utility as for display)
+        # This ensures footnotes are handled correctly before DOCX conversion
         report_html = convert_markdown_to_html(markdown_content)
+        if not report_html or report_html.startswith("<pre>Error during Markdown conversion"):
+             print("Error [/download_docx]: Failed to convert Markdown to HTML before DOCX conversion.")
+             return jsonify({"success": False, "message": "Error: Could not prepare report content for DOCX conversion."}), 500
 
-        # 2. Convert HTML to DOCX in memory buffer using the utility function
+
+        # 2. Convert HTML to DOCX in memory buffer
         docx_buffer = convert_html_to_docx(report_html)
+        if docx_buffer is None:
+            # convert_html_to_docx already prints errors
+             return jsonify({"success": False, "message": "Error: Failed during HTML to DOCX conversion process."}), 500
 
-        # 3. Prepare filename
-        # Sanitize topic for filename: remove invalid chars, replace spaces
+        # 3. Prepare filename (Keep existing sanitization)
         safe_filename_topic = re.sub(r'[^\w\s-]', '', topic).strip()
         safe_filename_topic = re.sub(r'[-\s]+', '_', safe_filename_topic)
-        # Truncate if too long
         filename_base = f"{safe_filename_topic}_Research_Report"
         filename = f"{filename_base[:config.DOWNLOAD_FILENAME_MAX_LENGTH]}.docx"
 
@@ -490,7 +490,7 @@ def download_docx():
             mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         )
 
-    except ImportError: # Should be caught by initial check, but as fallback
+    except ImportError: # Fallback
          print("Error [/download_docx]: html2docx library missing during conversion attempt.")
          return jsonify({"success": False, "message": "Internal Server Error: DOCX conversion library missing."}), 500
     except Exception as e:
@@ -502,15 +502,9 @@ def download_docx():
 
 # --- Run the App ---
 if __name__ == '__main__':
-    # Check if GOOGLE_API_KEY was loaded (config already checked, this is redundant but informative)
     if not config.GOOGLE_API_KEY:
         print("FATAL ERROR: GOOGLE_API_KEY not found. Please set it in your .env file or environment variables.")
-        sys.exit(1) # Exit if key is missing
+        sys.exit(1)
 
     print(f"INFO: Starting Flask server...")
-    # Use threaded=True for handling multiple requests concurrently during SSE
-    # debug=True enables auto-reloading and provides detailed error pages (disable in production)
     app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
-    # For production, use a proper WSGI server like Gunicorn or Waitress:
-    # Example: gunicorn --workers 4 --bind 0.0.0.0:5001 app:app
-    # Example: waitress-serve --host 0.0.0.0 --port 5001 app:app
