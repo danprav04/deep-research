@@ -8,18 +8,20 @@
     <style>
         body { padding-bottom: 5rem; } /* Add some bottom padding */
         main { margin-top: 2rem; }
+        form label { margin-bottom: 0.5rem; display: block; }
+        form button { margin-top: 1rem; }
     </style>
 </head>
 <body>
     <main class="container">
         <hgroup>
             <h1>Deep Research Agent</h1>
-            <h2>Enter a topic to start the research process</h2>
+            <h2>Enter a topic to start the automated research process</h2>
         </hgroup>
 
         <form action="{{ url_for('research_start') }}" method="post">
             <label for="topic">Research Topic:</label>
-            <input type="text" id="topic" name="topic" placeholder="e.g., The impact of AI on software development" required>
+            <input type="text" id="topic" name="topic" placeholder="e.g., The history and impact of the printing press" required>
             <button type="submit">Start Research</button>
         </form>
 

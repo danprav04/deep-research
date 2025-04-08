@@ -20,8 +20,13 @@ JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.MULTILINE
 CITATION_URL_PATTERN = re.compile(r"\[Source URL:\s*(https?://[^\s\]]+)\s*\]")
 
 # Configure Markdown-it instance
-# Enable HTML tags, links, typographer, and footnotes
-md = MarkdownIt("commonmark", {"html": True, "linkify": True, "typographer": True}).enable("table").use(footnote_plugin)
+# Enable HTML tags, links, typographer, tables, and footnotes
+md = (
+    MarkdownIt("commonmark", {"html": True, "linkify": True, "typographer": True})
+    .enable("table")
+    .use(footnote_plugin) # This enables footnotes and generates the necessary HTML structure
+)
+
 
 # --- Functions ---
 
@@ -41,12 +46,9 @@ def parse_research_plan(llm_response: str) -> list:
     if not match:
         # Attempt to find JSON even without backticks as a fallback
         try:
-            # Be cautious with loading arbitrary JSON directly from LLM
-            # This assumes the LLM output *is* the JSON list if no block is found
             potential_json = llm_response.strip()
             if potential_json.startswith('[') and potential_json.endswith(']'):
                  plan = json.loads(potential_json)
-                 # Basic validation
                  if isinstance(plan, list) and all(isinstance(item, dict) and 'step' in item and 'keywords' in item for item in plan):
                       print("INFO: Parsed research plan using fallback (no ```json block).")
                       return plan
@@ -69,7 +71,6 @@ def parse_research_plan(llm_response: str) -> list:
             if not isinstance(item, dict) or 'step' not in item or 'keywords' not in item:
                 raise TypeError("Parsed list items do not have 'step' and 'keywords' keys.")
             if not isinstance(item['keywords'], list):
-                 # Attempt to fix if keywords is a string instead of list (common LLM error)
                  if isinstance(item['keywords'], str):
                       print(f"Warning: Fixing keywords field for step '{item['step']}' - was string, expected list.")
                       item['keywords'] = [kw.strip() for kw in item['keywords'].split(',') if kw.strip()]
@@ -101,6 +102,8 @@ def generate_bibliography_map(scraped_sources: list) -> tuple[dict, str]:
     for i, source in enumerate(scraped_sources, 1):
         url = source.get('url')
         if url:
+            # Ensure consistent URL format (e.g., strip trailing slash) if needed
+            # url = url.rstrip('/')
             url_to_index_map[url] = i
             bibliography_entries.append(f"[{i}]: {url}")
 
@@ -109,17 +112,20 @@ def generate_bibliography_map(scraped_sources: list) -> tuple[dict, str]:
 
 
 def convert_markdown_to_html(markdown_text: str) -> str:
-    """Converts Markdown text to HTML using markdown-it-py with footnotes."""
+    """Converts Markdown text to HTML using markdown-it-py with footnotes enabled."""
     if not markdown_text:
         return ""
     try:
         # The 'md' instance is already configured with footnote_plugin
+        # It will automatically handle [^N] and [^N]: syntax
         html = md.render(markdown_text)
         return html
     except Exception as e:
         print(f"Error converting Markdown to HTML: {e}")
         # Return raw text wrapped in pre tags as fallback
-        return f"<pre>Error during Markdown conversion: {e}\n\n{markdown_text}</pre>"
+        import html as html_escaper # To escape the raw markdown for safe display
+        escaped_md = html_escaper.escape(markdown_text)
+        return f"<pre>Error during Markdown conversion: {html_escaper.escape(str(e))}\n\n{escaped_md}</pre>"
 
 
 def convert_html_to_docx(html_content: str) -> BytesIO | None:
@@ -130,8 +136,8 @@ def convert_html_to_docx(html_content: str) -> BytesIO | None:
         html_content: The HTML string to convert.
 
     Returns:
-        A BytesIO buffer containing the DOCX file data, or None if conversion fails.
-        Returns None if html2docx is not installed.
+        A BytesIO buffer containing the DOCX file data, or None if conversion fails
+        or if html2docx is not installed.
     """
     if not DOCX_CONVERSION_AVAILABLE:
         print("Error: html2docx library not available for DOCX conversion.")
@@ -139,22 +145,20 @@ def convert_html_to_docx(html_content: str) -> BytesIO | None:
 
     if not html_content:
         print("Warning: Attempted to convert empty HTML to DOCX.")
-        # Return an empty buffer or handle as needed, maybe create a minimal docx?
-        # For now, returning None as it's likely an upstream issue if content is empty.
         return None
 
     buffer = BytesIO()
     try:
-        # html2docx expects a file-like object or path for parsing, we use BytesIO
-        # Need to encode the HTML string to bytes first
+        # html2docx requires bytes, so encode the HTML string
         html_bytes = html_content.encode('utf-8')
         html_buffer = BytesIO(html_bytes)
 
-        # Convert using html2docx
-        parser = html2docx.HTML2Docx(buffer, "BUFFER") # Use "BUFFER" to work with BytesIO
-        parser.parse_html_stream(html_buffer) # Use parse_html_stream for buffers
+        # Initialize parser to write to the buffer
+        # The second argument ('') can be base_url if resolving relative paths is needed, unlikely here.
+        parser = html2docx.HTML2Docx(buffer, '')
+        parser.parse_html_stream(html_buffer) # Use stream method for BytesIO
 
-        buffer.seek(0) # Reset buffer position to the beginning for reading
+        buffer.seek(0) # Reset buffer position for reading
         return buffer
     except Exception as e:
         print(f"Error converting HTML to DOCX: {e}")
