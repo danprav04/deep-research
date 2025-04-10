@@ -1,0 +1,4 @@
+http://34.221.202.198 {
+    reverse_proxy localhost:8000
+    
+}
