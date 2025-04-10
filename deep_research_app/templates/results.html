@@ -1,374 +1,313 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Research: {{ topic }}</title> <!-- Display original topic -->
+    <title>Research Results for "{{ topic }}"</title>
     <link rel="stylesheet" href="{{ pico_css }}">
+    <!-- Link the custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
     <style>
-        /* --- NEW: Enable smooth scrolling for anchor links --- */
-        html {
-            scroll-behavior: smooth;
-        }
-        body { padding-top: 1rem; padding-bottom: 3rem; }
-        main.container { max-width: 960px; }
-        h1, h2, h3 { margin-bottom: 0.5rem; }
-        hr { margin: 2rem 0; }
-        #progress-log-container {
-            max-height: 300px;
-            overflow-y: auto;
-            background-color: var(--pico-card-background-color);
-            border: 1px solid var(--pico-card-border-color);
+        /* Add minor inline styles if needed, e.g., for layout */
+        body { padding-bottom: 5rem; }
+        .progress-log, #report-container, #final-report-display { margin-top: 1.5rem; } /* Applied consistent margin */
+        #progress-list { max-height: 300px; overflow-y: auto; background-color: #f8f9fa; padding: 10px; border-radius: 5px; font-size: 0.9em; list-style: none; /* Remove bullets */ padding-left: 10px; }
+        #progress-list li { margin-bottom: 5px; word-wrap: break-word; border-left: 3px solid #ccc; padding-left: 8px; }
+        #progress-list li.error { color: red; font-weight: bold; border-left-color: red; }
+        #progress-list li.fatal-error { color: darkred; font-weight: bold; border-left-color: darkred; }
+        /* Style for report/synthesis sections before content arrives */
+        #synthesis-output, #report-output {
+            min-height: 100px; /* Placeholder height */
             padding: 1rem;
-            border-radius: var(--pico-border-radius);
-            margin-bottom: 1.5rem;
-            font-size: 0.875em;
+            border: 1px dashed var(--pico-muted-border-color);
+            margin-bottom: 1rem;
+            white-space: pre-wrap; /* Keep whitespace formatting for streaming */
+            word-wrap: break-word;
+            background-color: var(--pico-code-background-color); /* Use code block bg */
+            font-family: var(--pico-font-family); /* Use standard font */
+            font-size: 0.95em;
         }
-        #progress-log { list-style: none; padding-left: 0; margin: 0; }
-        #progress-log li { margin-bottom: 0.3rem; word-break: break-word; line-height: 1.4; }
-        #progress-log li:first-child { font-weight: bold; }
-        #progress-log li.error { color: var(--pico-form-invalid-color); font-weight: bold; }
-        .stream-container {
-            border: 1px dashed var(--pico-primary-focus);
+        #raw-data-preview {
+            background-color: #2d2d2d; /* Dark background */
+            color: #f0f0f0; /* Light text */
             padding: 1rem;
-            margin-top: 1rem;
-            margin-bottom: 1.5rem;
-            border-radius: var(--pico-border-radius);
-            background-color: var(--pico-contrast-hover);
-            display: none;
+            border-radius: 5px;
             font-family: monospace;
-            font-size: 0.9em;
+            font-size: 0.85em;
             max-height: 400px;
-            overflow-y: auto;
-            /* --- MODIFIED: Ensure wrapping for stream content --- */
-            white-space: pre-wrap;    /* Wrap lines but preserve line breaks/spaces */
-            word-wrap: break-word;    /* Force break long words/URLs */
-            overflow-wrap: break-word;/* Alias for word-wrap, broader compatibility */
-        }
-        /* --- NEW: Explicitly target pre tags inside stream container --- */
-        .stream-container pre {
+            overflow: auto;
             white-space: pre-wrap;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            margin: 0; /* Remove default pre margin */
+            word-wrap: break-word; /* Allow long lines (like URLs) to wrap */
         }
-
-        .stream-container h4 { margin-top: 0; color: var(--pico-primary); }
-        #final-report-container { margin-top: 2rem; }
-        #final-report-content {
-            background-color: var(--pico-card-background-color);
-            padding: 1.5rem;
-            border-radius: var(--pico-border-radius);
-            border: 1px solid var(--pico-card-border-color);
-            /* --- NEW: Add wrapping for final report content --- */
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-         }
-        #final-report-content h1, #final-report-content h2, #final-report-content h3 { margin-top: 1.5em; margin-bottom: 0.5em; border-bottom: 1px solid var(--pico-muted-border-color); padding-bottom: 0.2em; }
-        #final-report-content h1:first-child, #final-report-content h2:first-child { margin-top: 0; }
-        /* --- NEW: Add wrapping specifically for pre tags within final report --- */
-        #final-report-content pre {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            background-color: var(--pico-contrast); /* Optional: Style code blocks */
-            padding: 1em;
-            border-radius: var(--pico-border-radius);
-            overflow-x: auto; /* Add horizontal scroll if absolutely needed, but wrap preferred */
-        }
-        /* --- Modified footnote link style for better visibility --- */
-        #final-report-content sup a {
-            text-decoration: none;
-            background-color: var(--pico-mark-background-color);
-            color: var(--pico-mark-color); /* Ensure text color contrasts with background */
-            padding: 2px 4px; /* Slightly more padding */
-            border-radius: var(--pico-border-radius);
-            font-size: 0.8em; /* Slightly smaller font */
-            vertical-align: super; /* Ensure it stays superscript */
-            transition: background-color 0.2s ease; /* Smooth transition */
-        }
-        #final-report-content sup a:hover, #final-report-content sup a:focus {
-             background-color: var(--pico-primary); /* Highlight on hover/focus */
-             color: var(--pico-primary-inverse); /* Ensure text is visible on hover */
-             outline: none; /* Remove default focus outline if needed */
-        }
-        /* --- Style for the footnote definition link (back arrow) --- */
-        #final-report-content .footnotes li p a {
-             text-decoration: none;
-             color: var(--pico-primary);
-        }
-        #final-report-content .footnotes li p a:hover {
-            text-decoration: underline;
-        }
-        /* --- Style for the footnote list itself --- */
-        #final-report-content .footnotes {
-             margin-top: 2.5em; /* More space before footnotes */
-             padding-top: 1.5em; /* More space inside the footnotes section */
-             border-top: 2px solid var(--pico-primary-focus); /* More prominent top border */
-             font-size: 0.9em;
-             line-height: 1.6; /* Improve readability */
-        }
-        #final-report-content .footnotes ol { padding-left: 20px; }
-        #final-report-content .footnotes li { margin-bottom: 0.75em; } /* More space between items */
-        #final-report-content .footnotes li:target {
-             background-color: var(--pico-primary-focus); /* Highlight target footnote */
-             border-radius: var(--pico-border-radius);
-             outline: 1px solid var(--pico-primary);
-             /* Add a small transition */
-             transition: background-color 0.3s ease-in-out;
-        }
-        #error-container { margin-top: 1.5rem; }
-        #error-container article { border-color: var(--pico-form-invalid-border-color); background-color: var(--pico-form-invalid-background-color); }
-        #error-container header { color: var(--pico-form-invalid-color); }
-        article[aria-busy="true"]::before {
-           width: 2rem;
-           height: 2rem;
-        }
-        /* --- Style for download form --- */
-        #download-form {
-            margin-top: 1.5rem;
-            padding: 1rem;
-            border: 1px solid var(--pico-muted-border-color);
-            border-radius: var(--pico-border-radius);
-            background-color: var(--pico-contrast-hover);
-        }
+        #download-buttons button { margin-right: 0.5rem; margin-bottom: 0.5rem; /* Add bottom margin for wrap */ }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--pico-primary); border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-left: 10px; vertical-align: middle; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
     <main class="container">
-        <hgroup>
-            <h1>Research Progress</h1>
-            <!-- Display the original, unencoded topic -->
-            <h2>Topic: {{ topic|e }}</h2> <!-- Use original topic, escape it -->
-        </hgroup>
-        <a href="/" role="button" class="secondary outline">Start New Research</a>
-        <hr>
+        <nav aria-label="breadcrumb">
+            <ul>
+                <li><a href="{{ url_for('index') }}">New Research</a></li>
+                <li>Research Results</li>
+            </ul>
+        </nav>
+        <article> <!-- Wrap main content in article for semantic HTML & Pico styling -->
+            <header>
+                <h1>Researching: "{{ topic }}"</h1>
+                <p>Please wait while the research is being conducted. Progress updates will appear below.</p>
+            </header>
 
-        <!-- Progress Area -->
-        <article id="progress-area" aria-busy="true">
-            <h3>Live Progress Log</h3>
-            <div id="progress-log-container">
-                <ul id="progress-log">
-                    <li>Initializing research process...</li>
+            <section id="progress-section">
+                <h2>Progress Log <span id="loader" class="loader"></span></h2>
+                <ul id="progress-list">
+                    <li>Initializing...</li>
                 </ul>
-            </div>
+            </section>
 
-            <!-- Streaming Output Area -->
-            <div id="synthesis-stream-container" class="stream-container">
-                <h4>Synthesizing Information (Live)...</h4>
-                <pre id="synthesis-stream-content"></pre>
-            </div>
-            <div id="report-stream-container" class="stream-container">
-                <h4>Generating Report (Live)...</h4>
-                <pre id="report-stream-content"></pre>
-            </div>
-        </article>
+            <section id="report-container" class="hidden">
+                <hr>
+                <h2>Live Synthesis Output</h2>
+                <p><em>Synthesizing information from sources... (Content will stream below)</em></p>
+                <div id="synthesis-output" aria-live="polite">Waiting for synthesis stream...</div>
 
-        <!-- Error Display Area -->
-        <div id="error-container" style="display: none;">
-            <article>
-                <header><strong>An Error Occurred</strong></header>
-                <p id="error-message"></p>
-            </article>
-        </div>
+                <h2>Live Report Generation</h2>
+                <p><em>Generating the final report... (Content will stream below)</em></p>
+                <div id="report-output" aria-live="polite">Waiting for report stream...</div>
+            </section>
 
-        <!-- Final Report Area -->
-        <section id="final-report-container" style="display: none;">
-             <hr>
-            <h2>Final Research Report</h2>
+            <section id="final-report-display" class="hidden">
+                <hr>
+                <h2>Final Research Report</h2>
+                <!-- This div will hold the final, styled report HTML -->
+                <div id="report-display">
+                    <!-- Report HTML will be injected here by JavaScript -->
+                    <p><em>Loading final report...</em></p>
+                </div>
 
-            <!-- Download Form -->
-            <form id="download-form" action="/download_docx" method="post" style="display: none;">
-                 <p>Download the report:</p>
-                 <!-- Hidden field to store raw Markdown -->
-                 <textarea name="markdown_report" id="raw-markdown-report" style="display: none;"></textarea>
-                 <!-- Hidden field for topic (used for filename) -->
-                 <input type="hidden" name="topic" value="{{ topic|e }}">
-                 <button type="submit" id="download-docx-button">Download as DOCX</button>
-                 <!-- --- MODIFIED: Corrected library name in message --- -->
-                 <small id="docx-unavailable-msg" style="display: none; color: var(--pico-muted-color); margin-left: 1rem;">DOCX download requires the 'html2docx' library on the server.</small>
-            </form>
+                <div id="final-actions" style="margin-top: 2rem;">
+                     <h3>Downloads & Raw Data</h3>
+                     <div id="download-buttons">
+                         <form id="download-md-form" style="display: inline;">
+                             <button type="button" id="download-md-button" disabled>Copy Markdown</button>
+                         </form>
+                         <form id="download-docx-form" action="{{ url_for('download_docx') }}" method="post" style="display: inline;" class="hidden">
+                             <input type="hidden" name="markdown_report" id="hidden-markdown-report">
+                             <input type="hidden" name="topic" value="{{ topic }}">
+                             <button type="submit" id="download-docx-button" disabled>Download DOCX</button>
+                         </form>
+                         <span id="docx-disabled-msg" style="font-size: 0.8em; margin-left: 5px;" class="hidden"> (DOCX download disabled: server missing 'html2docx' library)</span>
+                     </div>
+                     <details style="margin-top: 1.5rem;">
+                        <summary>View Raw Scraped Data Preview</summary>
+                        <pre id="raw-data-preview">Loading raw data preview...</pre>
+                     </details>
+                </div>
+            </section>
+        </article> <!-- End article wrap -->
 
-            <div id="final-report-content">
-                <!-- Report HTML will be injected here -->
-            </div>
-             <details style="margin-top: 2rem;">
-                 <summary>Raw Scraped Data Snippet (Debug)</summary>
-                 <pre id="scraped-preview" style="font-size: 0.8em; background: var(--pico-contrast); max-height: 200px; overflow-y: auto;">Not available.</pre>
-             </details>
-        </section>
-
-        <hr style="margin-top: 30px;">
-        <a href="/" role="button" class="secondary outline">Start New Research</a>
     </main>
 
+    <!-- Include the custom JS -->
+    <script src="{{ url_for('static', filename='results.js') }}"></script>
     <script>
-        const progressLog = document.getElementById('progress-log');
-        const progressLogContainer = document.getElementById('progress-log-container');
-        const progressArea = document.getElementById('progress-area');
-        const finalReportContainer = document.getElementById('final-report-container');
-        const finalReportContent = document.getElementById('final-report-content');
-        const errorContainer = document.getElementById('error-container');
-        const errorMessage = document.getElementById('error-message');
-        const scrapedPreview = document.getElementById('scraped-preview');
-
-        // Stream containers and content elements
-        const synthesisStreamContainer = document.getElementById('synthesis-stream-container');
-        const synthesisStreamContent = document.getElementById('synthesis-stream-content');
-        const reportStreamContainer = document.getElementById('report-stream-container');
-        const reportStreamContent = document.getElementById('report-stream-content');
-
-        // Download elements
-        const downloadForm = document.getElementById('download-form');
+        // Ensure variables are declared correctly, prefer const/let
+        const encodedTopic = "{{ encoded_topic | e }}"; // Use Flask's 'e' filter for safety
+        const progressList = document.getElementById('progress-list');
+        const loader = document.getElementById('loader');
+        const reportContainer = document.getElementById('report-container');
+        const finalReportDisplay = document.getElementById('final-report-display');
+        const reportDisplayDiv = document.getElementById('report-display'); // Target for final HTML
+        const synthesisOutput = document.getElementById('synthesis-output');
+        const reportOutput = document.getElementById('report-output');
+        const rawDataPreview = document.getElementById('raw-data-preview');
+        const downloadMdButton = document.getElementById('download-md-button');
+        const downloadDocxForm = document.getElementById('download-docx-form');
         const downloadDocxButton = document.getElementById('download-docx-button');
-        const docxUnavailableMsg = document.getElementById('docx-unavailable-msg');
-        const rawMarkdownReport = document.getElementById('raw-markdown-report');
+        const hiddenMarkdownReport = document.getElementById('hidden-markdown-report');
+        const docxDisabledMsg = document.getElementById('docx-disabled-msg');
 
-        // Get the URL-encoded topic passed from Flask
-        const encodedTopic = "{{ encoded_topic|e }}"; // Still need encoded for SSE URL
-        const displayTopic = "{{ topic|e }}"; // Use original for display/forms
 
-        let currentStreamTarget = null;
+        let finalMarkdownContent = ""; // Store final raw markdown
+        let eventSource = null; // Declare eventSource variable
 
-        function addProgress(message, isError = false) {
+        function addProgress(message, isError = false, isFatal = false) {
             const li = document.createElement('li');
-            // Basic sanitization (replace < >) - avoid complex HTML injection from progress messages
-            li.textContent = message.replace(/</g, "<").replace(/>/g, ">");
-            if (isError) {
+            // Sanitize message slightly - prevent basic HTML injection in logs
+            li.textContent = message;
+            if (isFatal) {
+                 li.classList.add('fatal-error');
+            } else if (isError) {
                 li.classList.add('error');
             }
-            progressLog.insertBefore(li, progressLog.firstChild);
-            progressLogContainer.scrollTop = 0;
+            progressList.appendChild(li);
+            // Auto-scroll to the bottom
+            progressList.scrollTop = progressList.scrollHeight;
         }
 
-        function handleStreamChunk(content, target) {
-            let targetEl;
-            let targetContainer;
-            if (target === 'synthesis') {
-                targetEl = synthesisStreamContent;
-                targetContainer = synthesisStreamContainer;
-                synthesisStreamContainer.style.display = 'block';
-            } else if (target === 'report') {
-                targetEl = reportStreamContent;
-                targetContainer = reportStreamContainer;
-                reportStreamContainer.style.display = 'block';
-            } else {
-                return;
+        function connectSSE() {
+            // --- SSE Connection ---
+            if (eventSource) {
+                eventSource.close(); // Close existing connection if any
             }
-            targetEl.textContent += content;
-            targetContainer.scrollTop = targetContainer.scrollHeight;
-        }
+            console.log(`Connecting to SSE stream at /stream?topic=${encodedTopic}`);
+            eventSource = new EventSource(`/stream?topic=${encodedTopic}`);
 
-        // Establish SSE connection using the encoded topic
-        const params = new URLSearchParams({ topic: encodedTopic });
-        const eventSource = new EventSource(`/stream?${params.toString()}`);
+            eventSource.onopen = function() {
+                console.log("SSE connection opened.");
+                progressList.innerHTML = ''; // Clear initializing message
+                addProgress("Connection established. Starting research process...");
+                reportContainer.classList.remove('hidden'); // Show streaming areas
+                synthesisOutput.textContent = ""; // Clear placeholders
+                reportOutput.textContent = "";
+                loader.classList.remove('hidden'); // Ensure loader is visible
+            };
 
-        eventSource.onmessage = function(event) {
-            try {
-                const data = JSON.parse(event.data);
+            eventSource.onmessage = function(event) {
+                // console.log("SSE message received:", event.data); // Debugging
+                try {
+                    const eventData = JSON.parse(event.data);
 
-                switch (data.type) {
-                    case 'progress':
-                        addProgress(`[${new Date().toLocaleTimeString()}] ${data.message}`);
-                        break;
-                    case 'error':
-                        const errorMsgText = `ERROR: ${data.message}`;
-                        addProgress(errorMsgText, true);
-                        errorMessage.textContent = errorMsgText;
-                        errorContainer.style.display = 'block';
-                        progressArea.removeAttribute('aria-busy');
-                        // Don't close eventSource on all errors, maybe recoverable
-                        break;
-                    case 'stream_start':
-                         currentStreamTarget = data.target;
-                         addProgress(`AI starting to generate: ${currentStreamTarget}...`);
-                         if (currentStreamTarget === 'synthesis') {
-                             synthesisStreamContent.textContent = '';
-                             synthesisStreamContainer.style.display = 'block';
-                         }
-                         if (currentStreamTarget === 'report') {
-                             reportStreamContent.textContent = '';
-                             reportStreamContainer.style.display = 'block';
-                         }
-                         break;
-                    case 'llm_chunk':
-                         if (currentStreamTarget === data.target) {
-                            handleStreamChunk(data.content, data.target);
-                         }
-                         break;
-                    case 'complete':
-                        // --- ADDED CONSOLE LOGS HERE ---
-                        console.log("Received 'complete' event data:", data);
-                        console.log("Checking data.docx_available:", data.docx_available);
-                        // -----------------------------
-
-                        addProgress("Research process complete.");
-                        progressArea.removeAttribute('aria-busy');
-                        finalReportContent.innerHTML = data.report_html;
-
-                        // Handle download section
-                        if (data.report_markdown) {
-                            rawMarkdownReport.value = data.report_markdown; // Store raw markdown
-                            if (data.docx_available) {
-                                downloadForm.style.display = 'block'; // Show download form
-                                downloadDocxButton.disabled = false;
-                                docxUnavailableMsg.style.display = 'none';
-                            } else {
-                                // html2docx not available on server
-                                downloadForm.style.display = 'block'; // Still show section
-                                downloadDocxButton.disabled = true; // Disable button
-                                // --- MODIFIED: Ensure correct message is displayed ---
-                                docxUnavailableMsg.style.display = 'inline'; // Show warning
+                    switch (eventData.type) {
+                        case 'progress':
+                            addProgress(eventData.message);
+                            break;
+                        case 'error':
+                            addProgress(eventData.message, true, eventData.fatal || false);
+                            if (eventData.fatal) {
+                                addProgress("Research stopped due to fatal error.", true, true);
+                                loader.classList.add('hidden'); // Hide loader on fatal error
+                                if(eventSource) eventSource.close(); // Close connection on fatal error
                             }
-                        } else {
-                            addProgress("No final report markdown received.", true);
-                            downloadForm.style.display = 'none'; // Hide form if no markdown
-                        }
+                            break;
+                        case 'stream_start':
+                            if (eventData.target === 'synthesis') {
+                                synthesisOutput.textContent = ""; // Clear "Waiting..." message
+                                addProgress("Starting LLM synthesis stream...");
+                            } else if (eventData.target === 'report') {
+                                reportOutput.textContent = ""; // Clear "Waiting..." message
+                                addProgress("Starting LLM report generation stream...");
+                            }
+                            break;
+                        case 'llm_chunk':
+                            // Append chunks to the respective live output areas
+                            const targetElement = eventData.target === 'synthesis' ? synthesisOutput : reportOutput;
+                            targetElement.textContent += eventData.content;
+                            // Basic auto-scroll for live areas (optional)
+                            // targetElement.scrollTop = targetElement.scrollHeight;
+                            break;
+                        case 'complete':
+                            addProgress("Research complete. Processing final results...");
+                            reportContainer.classList.add('hidden'); // Hide live streaming areas
+                            finalReportDisplay.classList.remove('hidden'); // Show final report area
 
-                        if (data.raw_scraped_data_preview) {
-                           scrapedPreview.textContent = data.raw_scraped_data_preview;
-                        } else {
-                           scrapedPreview.textContent = "Not available.";
-                        }
-                        finalReportContainer.style.display = 'block'; // Show report section
+                            // Inject the final *HTML* report into the display div
+                            reportDisplayDiv.innerHTML = eventData.report_html || "<p><em>Error: Received empty report HTML.</em></p>";
 
-                        eventSource.close(); // Research is done, close connection
-                        break;
-                    case 'stream_terminated': // Added to handle graceful close from server finally block
-                        addProgress("Server stream terminated.", false);
-                        progressArea.removeAttribute('aria-busy');
-                        if (eventSource) eventSource.close();
-                        break;
+                            // Store the raw *Markdown* for copy/download
+                            finalMarkdownContent = eventData.report_markdown || "";
+                            hiddenMarkdownReport.value = finalMarkdownContent; // Set for DOCX form
+
+                            // Display raw data preview
+                            rawDataPreview.textContent = eventData.raw_scraped_data_preview || "No raw data preview available.";
+
+                            // Enable download buttons
+                            downloadMdButton.disabled = !finalMarkdownContent; // Enable only if content exists
+                            if (eventData.docx_available && finalMarkdownContent) {
+                                downloadDocxForm.classList.remove('hidden');
+                                downloadDocxButton.disabled = false;
+                                docxDisabledMsg.classList.add('hidden');
+                            } else {
+                                downloadDocxForm.classList.add('hidden'); // Ensure it's hidden if not available
+                                downloadDocxButton.disabled = true;
+                                if (!eventData.docx_available) {
+                                     docxDisabledMsg.classList.remove('hidden');
+                                }
+                            }
+
+                            // *** IMPORTANT: Call the tooltip function AFTER HTML is injected ***
+                            if (typeof addCitationTooltips === 'function') {
+                                addCitationTooltips();
+                            } else {
+                                console.error("addCitationTooltips function not found!");
+                            }
+
+                            addProgress("Final report displayed. Process finished.");
+                            loader.classList.add('hidden');
+                            if(eventSource) eventSource.close(); // Close connection on normal completion
+                            break;
+                        case 'stream_terminated':
+                            // This signal means the server stream has ended, regardless of success/failure
+                            addProgress("Server stream terminated.", false);
+                            loader.classList.add('hidden');
+                            if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+                                eventSource.close();
+                            }
+                            // If the final report hasn't been shown yet (e.g., due to error before 'complete')
+                            if (finalReportDisplay.classList.contains('hidden')) {
+                                addProgress("Process stopped before completion. Check logs for errors.", true);
+                            }
+                            break;
+                        default:
+                            console.warn("Received unknown SSE event type:", eventData.type);
+                    }
+                } catch (e) {
+                    console.error("Error parsing SSE message or processing event:", e);
+                    addProgress(`Client-side error processing update: ${e.message}`, true);
+                    // Avoid adding the raw data if parsing failed
+                    // addProgress(`Raw data: ${event.data}`, true);
                 }
-            } catch (e) {
-                console.error("Error parsing SSE data:", e, "Raw data:", event.data); // Log raw data on error
-                addProgress("Error processing update from server.", true);
-            }
-        };
+            };
 
-        eventSource.onerror = function(err) {
-            console.error("EventSource failed:", err);
-            if (eventSource.readyState === EventSource.CLOSED) {
-                 addProgress("Server connection closed.", false);
-            } else if (eventSource.readyState === EventSource.CONNECTING) {
-                 addProgress("Connection lost, attempting to reconnect...", true);
-                 // No need to display the big error message yet, browser might reconnect
-            } else {
-                const errorMsg = "Connection to server lost or failed unexpectedly. Please try starting new research.";
-                addProgress(errorMsg, true);
-                errorMessage.textContent = errorMsg;
-                errorContainer.style.display = 'block';
-                progressArea.removeAttribute('aria-busy');
-                if (eventSource) eventSource.close(); // Close definitively on unrecoverable error
-            }
-        };
+            eventSource.onerror = function(error) {
+                console.error("SSE connection error:", error);
+                addProgress("Error connecting to the research stream. Please check the server or try again.", true, true);
+                loader.classList.add('hidden'); // Hide loader on connection error
+                if(eventSource) eventSource.close();
+                // Hide streaming areas if they were shown, indicate failure
+                reportContainer.classList.add('hidden');
+                if (finalReportDisplay.classList.contains('hidden')) { // Only if not already completed
+                    addProgress("Could not complete research due to connection failure.", true, true);
+                }
+                 // Disable buttons on error
+                 downloadMdButton.disabled = true;
+                 downloadDocxButton.disabled = true;
+                 downloadDocxForm.classList.add('hidden');
+            };
+        }
 
-        window.addEventListener('beforeunload', () => {
-            if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-                console.log("Closing EventSource connection on page unload.");
-                eventSource.close();
+        // --- Button Actions ---
+        downloadMdButton.addEventListener('click', () => {
+            if (finalMarkdownContent && navigator.clipboard) { // Check for clipboard API support
+                navigator.clipboard.writeText(finalMarkdownContent)
+                    .then(() => {
+                        addProgress("Report Markdown copied to clipboard.");
+                        // Optional: Change button text temporarily
+                        const originalText = downloadMdButton.textContent;
+                        downloadMdButton.textContent = "Copied!";
+                        downloadMdButton.disabled = true; // Briefly disable after copy
+                        setTimeout(() => {
+                             downloadMdButton.textContent = originalText;
+                             downloadMdButton.disabled = false;
+                        }, 2000);
+                    })
+                    .catch(err => {
+                        console.error('Failed to copy markdown: ', err);
+                        addProgress("Failed to copy Markdown automatically. Please copy manually.", true);
+                        // Consider showing the markdown in a modal or textarea here as a fallback
+                    });
+            } else if (!navigator.clipboard) {
+                 addProgress("Clipboard API not supported by your browser. Cannot copy automatically.", true);
+            }
+             else {
+                addProgress("No final report content available to copy.", true);
             }
         });
+
+        // --- Initial Setup ---
+        // Start the SSE connection when the page loads
+        connectSSE();
 
     </script>
 </body>

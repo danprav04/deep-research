@@ -1,0 +1,52 @@
+# config.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# --- Google API Key and Model Name ---
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# Use a valid Google model name (e.g., gemini-1.5-pro-latest, gemini-1.5-flash-latest)
+GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME")
+
+# --- Search Configuration ---
+MAX_SEARCH_RESULTS_PER_ENGINE_STEP = 5
+MAX_TOTAL_URLS_TO_SCRAPE = 50
+MAX_WORKERS = 10
+REQUEST_TIMEOUT = 12
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
+PICO_CSS_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"
+DDGS_RETRY_DELAY_SECONDS = 3.0
+INTER_SEARCH_DELAY_SECONDS = 1.5
+
+# --- Content Processing ---
+# Estimate, adjust based on model and observation
+TARGET_MAX_CONTEXT_TOKENS = 750000 # Target for Gemini 1.5 Pro/Flash context
+CHARS_PER_TOKEN_ESTIMATE = 4
+MAX_CONTEXT_CHARS_SAFETY_MARGIN = 0.9 # Use 90% of estimated max chars
+MAX_CONTEXT_CHARS = int(TARGET_MAX_CONTEXT_TOKENS * CHARS_PER_TOKEN_ESTIMATE * MAX_CONTEXT_CHARS_SAFETY_MARGIN)
+MIN_MEANINGFUL_WORDS_PER_PAGE = 50
+MAX_SCRAPE_CONTENT_LENGTH_MB = 10
+
+# --- LLM Configuration ---
+LLM_TEMPERATURE = 0.6
+LLM_MAX_RETRIES = 3
+LLM_RETRY_DELAY = 5
+
+# Safety Settings for Google Generative AI
+# Can be imported from google.generativeai.types if preferred
+HARM_CATEGORY_HARASSMENT = "HARM_CATEGORY_HARASSMENT"
+HARM_CATEGORY_HATE_SPEECH = "HARM_CATEGORY_HATE_SPEECH"
+HARM_CATEGORY_SEXUALLY_EXPLICIT = "HARM_CATEGORY_SEXUALLY_EXPLICIT"
+HARM_CATEGORY_DANGEROUS_CONTENT = "HARM_CATEGORY_DANGEROUS_CONTENT"
+BLOCK_MEDIUM_AND_ABOVE = "BLOCK_MEDIUM_AND_ABOVE"
+
+SAFETY_SETTINGS = {
+    HARM_CATEGORY_HARASSMENT: BLOCK_MEDIUM_AND_ABOVE,
+    HARM_CATEGORY_HATE_SPEECH: BLOCK_MEDIUM_AND_ABOVE,
+    HARM_CATEGORY_SEXUALLY_EXPLICIT: BLOCK_MEDIUM_AND_ABOVE,
+    HARM_CATEGORY_DANGEROUS_CONTENT: BLOCK_MEDIUM_AND_ABOVE,
+}
+
+# --- File Handling ---
+DOWNLOAD_FILENAME_MAX_LENGTH = 200
