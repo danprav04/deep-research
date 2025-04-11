@@ -6,3 +6,4 @@ __pycache__/
 *.sqlite3
 venv
 project_context.txt
+temp_scrape_files
