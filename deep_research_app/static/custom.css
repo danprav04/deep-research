@@ -124,7 +124,7 @@ main.container {
     padding-left: 1.5rem; /* Ensure padding for bullets/numbers */
 }
 #report-display ul { list-style: disc; }
-#report-display ol { list-style: decimal; }
+#report-display ol { list-style: decimal; } /* Ensure numbered lists use decimal */
 
 #report-display li {
     margin-bottom: 0.6rem; /* Space between list items */
@@ -259,45 +259,41 @@ main.container {
 }
 
 #report-display .footnotes hr { display: none; } /* Hide the default hr in footnotes section */
-#report-display .footnotes ol { padding-left: 0; list-style: none; }
 
+/* Style the ordered list itself */
+#report-display .footnotes ol {
+    padding-left: 2.5em; /* Ensure enough space for numbers */
+    list-style: decimal; /* Explicitly set decimal numbering */
+    margin-left: 0; /* Reset default margin */
+}
+
+/* Style individual bibliography items */
 #report-display .footnotes li {
     margin-bottom: 0.8rem;
-    position: relative; /* For absolute positioning of counter */
-    padding-left: 3.5em; /* Space for the counter */
+    padding-left: 0; /* Remove previous padding, rely on <ol> padding */
     line-height: 1.6; /* Better line height for potentially long URLs */
     overflow-wrap: break-word; /* Break long text/URLs */
     word-wrap: break-word;
-    word-break: break-all; /* Allow breaking long URLs anywhere */
+    /* word-break: break-all; */ /* Avoid break-all unless absolutely necessary */
 }
 
-/* Style the footnote counter (e.g., [1]) */
-#report-display .footnotes li::before {
-    content: "[" target-counter(attr(id, string), decimal) "]"; /* Get number from id="fn:N" */
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 3em; /* Width of the counter area */
-    text-align: right;
-    padding-right: 0.5em;
-    font-weight: bold;
-    color: var(--pico-primary);
-}
+/* --- Removed ::before rule that added [N] --- */
+/* #report-display .footnotes li::before { ... } */
 
 /* Style links within bibliography items */
-#report-display .footnotes li a {
+#report-display .footnotes li a:not(.footnote-backref) { /* Target only the URL links we add */
     color: var(--pico-primary);
     text-decoration: none;
-    word-break: break-all; /* Ensure links themselves can break */
+    word-break: break-all; /* Allow breaking long URLs */
 }
-#report-display .footnotes li a:hover,
-#report-display .footnotes li a:focus {
+#report-display .footnotes li a:not(.footnote-backref):hover,
+#report-display .footnotes li a:not(.footnote-backref):focus {
     text-decoration: underline;
     outline: none;
 }
 
-/* Style the backlink (↩) */
-#report-display .footnotes li a[href^="#fnref:"] {
+/* Style the backlink (↩) - Keep original styling */
+#report-display .footnotes li a.footnote-backref {
     display: inline-block;
     margin-left: 0.6em;
     text-decoration: none;
@@ -308,8 +304,8 @@ main.container {
     border-radius: 3px;
     transition: background-color 0.2s ease, color 0.2s ease;
 }
-#report-display .footnotes li a[href^="#fnref:"]:hover,
-#report-display .footnotes li a[href^="#fnref:"]:focus {
+#report-display .footnotes li a.footnote-backref:hover,
+#report-display .footnotes li a.footnote-backref:focus {
     text-decoration: none;
     background-color: var(--pico-secondary-background);
     color: var(--pico-secondary-hover);
@@ -423,8 +419,8 @@ main.container {
     #report-display h3 { font-size: 1.3rem; }
     #report-display p { max-width: none; } /* Remove char limit on mobile */
     #report-display blockquote { margin-left: 0.5rem; margin-right: 0.5rem; }
-    #report-display .footnotes li { padding-left: 3em; }
-    #report-display .footnotes li::before { width: 2.5em; }
+    /* Adjust footnote list padding on smaller screens */
+    #report-display .footnotes ol { padding-left: 2em; }
 }
 
 @media (max-width: 480px) {
