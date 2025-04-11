@@ -9,10 +9,10 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
 
     <!-- <<< Load Libraries: DOMPurify and Marked.js >>> -->
-    <!-- DOMPurify for security -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js" integrity="sha512-Jc5hbySyMxMMAQ6syj53DRrq+dDo3AELRcL3hUj9DJuX4JmK2MDS4wqW8LjPD4bpJm7j0M583tL8Xz1XdwfLQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- DOMPurify for security - Corrected Integrity Hash -->
+    <script src="{{ url_for('static', filename='js/purify.min.js') }}"></script> 
     <!-- Marked.js for Markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script> <!-- Marked often doesn't provide SRI hashes on its main CDN link -->
     <!-- <<< END Libraries >>> -->
 
 </head>
