@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light"> <!-- Default theme -->
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,9 +8,9 @@
     <!-- Link the custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
     <style>
-        /* Minimal inline styles for base layout */
+        /* Minimal inline styles */
         body { padding-bottom: 5rem; }
-        .hidden { display: none !important; } /* Use !important to override Pico's potential hidden styles if needed */
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
@@ -21,7 +21,7 @@
                 <li>Research Results</li>
             </ul>
         </nav>
-        <article> <!-- Wrap main content in article for semantic HTML & Pico styling -->
+        <article> <!-- Wrap main content -->
             <header>
                 <hgroup>
                     <h1>Researching: "{{ topic }}"</h1>
@@ -48,7 +48,7 @@
                 <div id="report-output" aria-live="polite">Waiting for report stream...</div>
             </section>
 
-            <!-- Container for Final Report and Actions (Hidden Initially) -->
+            <!-- Container for Final Report (Hidden Initially) -->
             <section id="final-report-display" class="hidden">
                 <hr>
                 <h2>Final Research Report</h2>
@@ -57,119 +57,79 @@
                     <p><em>Loading final report...</em></p>
                 </div>
 
-                <!-- Actions moved here, below the report display -->
-                <div id="report-actions">
-                     <h3>Downloads</h3>
-                     <form id="download-md-form" style="display: inline;">
-                         <button type="button" id="download-md-button" disabled aria-label="Copy report markdown to clipboard">
-                             <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: text-bottom; margin-right: 4px;">
-                                <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1V1.5z"/>
-                                <path d="M5.5 1.5A.5.5 0 0 1 6 1h4a.5.5 0 0 1 .5.5v1A.5.5 0 0 1 10 3H6a.5.5 0 0 1-.5-.5v-1z"/>
-                                <path fill-rule="evenodd" d="M10 1.5a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1zM6 1.5a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1z"/>
-                             </svg>
-                             Copy Markdown
-                         </button>
-                     </form>
-                     <form id="download-docx-form" action="{{ url_for('download_docx') }}" method="post" style="display: inline;" class="hidden">
-                         <input type="hidden" name="markdown_report" id="hidden-markdown-report">
-                         <input type="hidden" name="topic" value="{{ topic }}">
-                         <button type="submit" id="download-docx-button" disabled aria-label="Download report as DOCX file">
-                             <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: text-bottom; margin-right: 4px;">
-                               <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
-                               <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
-                             </svg>
-                             Download DOCX
-                         </button>
-                     </form>
-                     <span id="docx-disabled-msg" class="hidden"> (DOCX conversion unavailable on server)</span>
-                </div>
-
-                <!-- REMOVED: Raw data preview details block was here -->
+                <!-- REMOVED: <div id="report-actions">...</div> -->
 
             </section>
         </article> <!-- End article wrap -->
 
     </main>
 
-    <!-- JavaScript should be loaded at the end -->
+    <!-- JavaScript -->
     <script>
-        // Ensure variables are declared correctly using const/let
-        const encodedTopic = "{{ encoded_topic | e }}"; // Use Flask's 'e' filter for safety
+        // JS Variables
+        const encodedTopic = "{{ encoded_topic | e }}";
         const progressList = document.getElementById('progress-list');
         const loader = document.getElementById('loader');
-        const reportContainer = document.getElementById('report-container'); // Contains live outputs
-        const finalReportDisplay = document.getElementById('final-report-display'); // Contains final report + actions
-        const reportDisplayDiv = document.getElementById('report-display'); // Target for final HTML report content
+        const reportContainer = document.getElementById('report-container');
+        const finalReportDisplay = document.getElementById('final-report-display');
+        const reportDisplayDiv = document.getElementById('report-display');
         const synthesisOutput = document.getElementById('synthesis-output');
         const reportOutput = document.getElementById('report-output');
-        // const rawDataPreview = document.getElementById('raw-data-preview'); // REMOVED
-        const downloadMdButton = document.getElementById('download-md-button');
-        const downloadDocxForm = document.getElementById('download-docx-form');
-        const downloadDocxButton = document.getElementById('download-docx-button');
-        const hiddenMarkdownReport = document.getElementById('hidden-markdown-report');
-        const docxDisabledMsg = document.getElementById('docx-disabled-msg');
+        // REMOVED: download button variables
 
-        let finalMarkdownContent = ""; // Store final raw markdown
-        let eventSource = null; // Declare eventSource variable
+        let eventSource = null;
 
         function addProgress(message, isError = false, isFatal = false) {
             const li = document.createElement('li');
-            // Sanitize message slightly - prevent basic HTML injection in logs
             li.textContent = message;
-            if (isFatal) {
-                 li.classList.add('fatal-error');
-            } else if (isError) {
-                li.classList.add('error');
-            }
+            if (isFatal) { li.classList.add('fatal-error'); }
+            else if (isError) { li.classList.add('error'); }
             progressList.appendChild(li);
-            // Auto-scroll to the bottom
             progressList.scrollTop = progressList.scrollHeight;
         }
 
-        // --- Citation Tooltip Functionality ---
-        // We need to add this *after* the final report HTML is injected.
+        // Citation Tooltip Functionality
         function addCitationTooltips() {
-            const citationLinks = reportDisplayDiv.querySelectorAll('sup a[href^="#fn:"]');
-            citationLinks.forEach(link => {
-                const footnoteId = link.getAttribute('href').substring(1); // Get 'fn:N'
-                const footnote = document.getElementById(footnoteId);
-                if (footnote) {
-                    // Get the main content of the footnote (excluding the backref link)
-                    const footnoteContent = footnote.innerHTML.replace(/<a.*?<\/a>/g, '').trim();
-                    // Use Pico's tooltip mechanism (data-tooltip attribute)
-                    link.setAttribute('data-tooltip', footnoteContent || 'Citation details not found.');
-                    link.setAttribute('aria-label', `Citation: ${footnoteContent || 'details unavailable'}`); // Accessibility
-                    link.style.cursor = 'help'; // Explicitly set cursor
-                } else {
-                     link.setAttribute('data-tooltip', 'Citation details missing.');
-                     link.setAttribute('aria-label', 'Citation details missing.');
-                }
-            });
-             console.log(`Citation tooltips applied to ${citationLinks.length} links.`);
+             setTimeout(() => {
+                const citationLinks = reportDisplayDiv.querySelectorAll('sup a[href^="#fn:"]');
+                citationLinks.forEach(link => {
+                    const footnoteId = link.getAttribute('href').substring(1);
+                    const footnote = document.getElementById(footnoteId);
+                    if (footnote) {
+                        const clone = footnote.cloneNode(true);
+                        const backlink = clone.querySelector('a[href^="#fnref:"]');
+                        if (backlink) { backlink.remove(); }
+                        let footnoteContent = clone.textContent.replace(/\s+/g, ' ').trim();
+                        const maxTooltipLength = 250;
+                        if (footnoteContent.length > maxTooltipLength) {
+                             footnoteContent = footnoteContent.substring(0, maxTooltipLength) + '...';
+                        }
+                        link.setAttribute('data-tooltip', footnoteContent || 'Citation details unavailable.');
+                        link.setAttribute('aria-label', `Citation: ${footnoteContent || 'details unavailable'}`);
+                    } else {
+                         link.setAttribute('data-tooltip', 'Citation details missing.');
+                         link.setAttribute('aria-label', 'Citation details missing.');
+                    }
+                });
+                 console.log(`Citation tooltips applied to ${citationLinks.length} links.`);
+             }, 100);
         }
 
 
         function connectSSE() {
-            if (eventSource) {
-                eventSource.close(); // Close existing connection if any
-            }
+            if (eventSource) { eventSource.close(); }
             console.log(`Connecting to SSE stream at /stream?topic=${encodedTopic}`);
             eventSource = new EventSource(`/stream?topic=${encodedTopic}`);
 
             eventSource.onopen = function() {
                 console.log("SSE connection opened.");
-                progressList.innerHTML = ''; // Clear initializing message
+                progressList.innerHTML = '';
                 addProgress("Connection established. Starting research process...");
-                reportContainer.classList.remove('hidden'); // Show live streaming areas
-                synthesisOutput.textContent = ""; // Clear placeholders
+                reportContainer.classList.remove('hidden');
+                synthesisOutput.textContent = "";
                 reportOutput.textContent = "";
-                loader.classList.remove('hidden'); // Ensure loader is visible
-                finalReportDisplay.classList.add('hidden'); // Ensure final report is hidden initially
-                // Disable buttons at start
-                downloadMdButton.disabled = true;
-                downloadDocxButton.disabled = true;
-                downloadDocxForm.classList.add('hidden');
-                docxDisabledMsg.classList.add('hidden');
+                loader.classList.remove('hidden');
+                finalReportDisplay.classList.add('hidden');
             };
 
             eventSource.onmessage = function(event) {
@@ -190,53 +150,28 @@
                             break;
                         case 'stream_start':
                             if (eventData.target === 'synthesis') {
-                                synthesisOutput.textContent = ""; // Clear "Waiting..."
-                                synthesisOutput.style.color = 'inherit'; // Reset color
+                                synthesisOutput.textContent = "";
+                                synthesisOutput.style.color = 'inherit';
                                 addProgress("Starting LLM synthesis stream...");
                             } else if (eventData.target === 'report') {
-                                reportOutput.textContent = ""; // Clear "Waiting..."
-                                reportOutput.style.color = 'inherit'; // Reset color
+                                reportOutput.textContent = "";
+                                reportOutput.style.color = 'inherit';
                                 addProgress("Starting LLM report generation stream...");
                             }
                             break;
                         case 'llm_chunk':
                             const targetElement = eventData.target === 'synthesis' ? synthesisOutput : reportOutput;
                             targetElement.textContent += eventData.content;
-                            // Basic auto-scroll (optional)
-                            // targetElement.scrollTop = targetElement.scrollHeight;
                             break;
                         case 'complete':
                             addProgress("Research complete. Processing final results...");
-                            reportContainer.classList.add('hidden'); // Hide live streaming areas
-                            finalReportDisplay.classList.remove('hidden'); // Show final report area
+                            reportContainer.classList.add('hidden');
+                            finalReportDisplay.classList.remove('hidden');
 
-                            // Inject the final *HTML* report
-                            reportDisplayDiv.innerHTML = eventData.report_html || "<p><em>Error: Received empty report HTML. Check progress log for details.</em></p>";
+                            // Inject the final HTML report
+                            reportDisplayDiv.innerHTML = eventData.report_html || "<article><p><em>Error: Received empty report HTML. Check progress log for details.</em></p></article>";
 
-                            // Store the raw *Markdown* for copy/download
-                            finalMarkdownContent = eventData.report_markdown || "";
-                            hiddenMarkdownReport.value = finalMarkdownContent;
-
-                            // REMOVED: raw data preview handling
-                            // rawDataPreview.textContent = eventData.raw_scraped_data_preview || "No raw data preview available.";
-
-                            // Enable download buttons based on content and server capability
-                            downloadMdButton.disabled = !finalMarkdownContent;
-                            if (eventData.docx_available && finalMarkdownContent) {
-                                downloadDocxForm.classList.remove('hidden');
-                                downloadDocxButton.disabled = false;
-                                docxDisabledMsg.classList.add('hidden');
-                            } else {
-                                downloadDocxForm.classList.add('hidden');
-                                downloadDocxButton.disabled = true;
-                                if (!eventData.docx_available && finalMarkdownContent) { // Show msg only if library is missing but content exists
-                                     docxDisabledMsg.classList.remove('hidden');
-                                } else {
-                                     docxDisabledMsg.classList.add('hidden');
-                                }
-                            }
-
-                            // *** IMPORTANT: Add tooltips AFTER HTML is injected ***
+                            // *** Add tooltips AFTER HTML is injected ***
                             addCitationTooltips();
 
                             addProgress("Final report displayed. Process finished.");
@@ -244,19 +179,13 @@
                             if(eventSource) eventSource.close();
                             break;
                         case 'stream_terminated':
-                            // Server stream ended (could be normal completion or error)
                             addProgress("Server stream terminated.", false);
                             loader.classList.add('hidden');
                             if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
                                 eventSource.close();
                             }
-                            // If the final report wasn't shown, it likely means an error occurred before 'complete'
                             if (finalReportDisplay.classList.contains('hidden')) {
                                 addProgress("Process stopped before completion. Check logs for errors.", true, true);
-                                // Ensure download buttons remain disabled
-                                downloadMdButton.disabled = true;
-                                downloadDocxButton.disabled = true;
-                                downloadDocxForm.classList.add('hidden');
                             }
                             break;
                         default:
@@ -265,8 +194,6 @@
                 } catch (e) {
                     console.error("Error parsing SSE message or processing event:", e);
                     addProgress(`Client-side error processing update: ${e.message}`, true);
-                    // Avoid adding the raw data if parsing failed
-                    // addProgress(`Raw data: ${event.data}`, true);
                 }
             };
 
@@ -275,63 +202,17 @@
                 addProgress("Error connecting to the research stream. Server might be down or busy. Please try again.", true, true);
                 loader.classList.add('hidden');
                 if(eventSource) eventSource.close();
-                // Hide streaming areas if they were shown
                 reportContainer.classList.add('hidden');
-                // Ensure final report section is hidden and buttons disabled
                 if (finalReportDisplay.classList.contains('hidden')) {
                     addProgress("Could not complete research due to connection failure.", true, true);
                 }
-                 downloadMdButton.disabled = true;
-                 downloadDocxButton.disabled = true;
-                 downloadDocxForm.classList.add('hidden');
-                 docxDisabledMsg.classList.add('hidden');
             };
         }
 
-        // --- Button Actions ---
-        downloadMdButton.addEventListener('click', () => {
-            if (finalMarkdownContent && navigator.clipboard) {
-                navigator.clipboard.writeText(finalMarkdownContent)
-                    .then(() => {
-                        addProgress("Report Markdown copied to clipboard.");
-                        const originalText = downloadMdButton.innerHTML; // Store original HTML including icon
-                        downloadMdButton.innerHTML = `
-                            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-check-lg" viewBox="0 0 16 16" style="vertical-align: text-bottom; margin-right: 4px;">
-                              <path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.4-6.425a.247.247 0 0 1 .02-.022z"/>
-                            </svg>
-                            Copied!`;
-                        downloadMdButton.disabled = true;
-                        setTimeout(() => {
-                             downloadMdButton.innerHTML = originalText;
-                             downloadMdButton.disabled = false;
-                        }, 2500);
-                    })
-                    .catch(err => {
-                        console.error('Failed to copy markdown: ', err);
-                        addProgress("Failed to copy Markdown automatically. Clipboard access might be blocked.", true);
-                        // You could show the markdown in a modal here as a fallback
-                    });
-            } else if (!navigator.clipboard) {
-                 addProgress("Clipboard API not supported or blocked by your browser. Cannot copy automatically.", true);
-            } else {
-                addProgress("No final report content available to copy.", true);
-            }
-        });
-
-        // Add event listener for theme switching (example)
-        // document.addEventListener('DOMContentLoaded', (event) => {
-        //     const themeSwitcher = document.getElementById('theme-switcher'); // Assume you add a switcher button/select
-        //     if(themeSwitcher) {
-        //         themeSwitcher.addEventListener('change', (e) => {
-        //              document.documentElement.setAttribute('data-theme', e.target.value);
-        //         });
-        //     }
-        // });
-
+        // --- REMOVED Button Actions ---
 
         // --- Initial Setup ---
         document.addEventListener('DOMContentLoaded', () => {
-             // Start the SSE connection when the page DOM is ready
              connectSSE();
         });
 

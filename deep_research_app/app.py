@@ -7,13 +7,13 @@ import json
 import traceback
 from urllib.parse import quote, unquote
 import concurrent.futures
-from io import BytesIO
+# from io import BytesIO # No longer needed for DOCX
 from html import escape # For escaping error messages in HTML
-import tempfile # Added for managing temp files directory if needed
+import tempfile
 
 from flask import (
     Flask, render_template, request, redirect, url_for, jsonify,
-    Response, stream_with_context, send_file
+    Response, stream_with_context # send_file no longer needed
 )
 import google.generativeai as genai
 
@@ -23,16 +23,11 @@ from llm_interface import call_gemini, stream_gemini
 from web_research import perform_web_search, scrape_url
 from utils import (
     parse_research_plan, generate_bibliography_map,
-    convert_markdown_to_html, convert_html_to_docx, # Ensure all needed utils are imported
-    DOCX_CONVERSION_AVAILABLE # Import the flag from utils
+    convert_markdown_to_html # convert_html_to_docx removed
+    # DOCX_CONVERSION_AVAILABLE flag removed
 )
 
-# --- Check for Optional Dependencies ---
-if DOCX_CONVERSION_AVAILABLE:
-    print("INFO: 'html2docx' library found. DOCX download will be available.")
-else:
-    print("WARN: 'html2docx' library not found. DOCX download will be disabled.")
-    print("      Install it using: pip install html2docx")
+# --- REMOVED Check for Optional Dependencies (DOCX) ---
 
 
 # --- Initialize Flask App ---
@@ -44,7 +39,6 @@ if not config.GOOGLE_API_KEY:
      raise ValueError("FATAL: GOOGLE_API_KEY environment variable not set in .env or environment.")
 try:
      genai.configure(api_key=config.GOOGLE_API_KEY)
-     # Ensure a model name is loaded, provide a default or raise error if missing
      if not config.GOOGLE_MODEL_NAME:
          raise ValueError("FATAL: GOOGLE_MODEL_NAME not set in .env or environment.")
      print(f"INFO: Google Generative AI configured with model: {config.GOOGLE_MODEL_NAME}")
@@ -65,9 +59,7 @@ def research_start():
     topic = request.form.get('topic', '').strip()
     if not topic:
         return redirect(url_for('index'))
-    # Encode the topic safely for use in URL query parameters
     encoded_topic = quote(topic)
-    # Pass topic, encoded_topic and css link to results.html
     return render_template('results.html',
                            topic=topic,
                            encoded_topic=encoded_topic,
@@ -83,37 +75,34 @@ def stream():
 
     def generate_updates():
         # --- Research state variables ---
-        scraped_source_metadata_list = [] # Stores {'url': ..., 'temp_filepath': ...}
-        temp_files_to_clean = []        # Stores paths of created temp files
+        scraped_source_metadata_list = []
+        temp_files_to_clean = []
         research_plan = []
-        accumulated_synthesis_md = "" # Store raw markdown for synthesis
-        final_report_markdown = "" # Store raw markdown for final report
+        accumulated_synthesis_md = ""
+        final_report_markdown = ""
         url_to_index_map = {}
         start_time_total = time.time()
 
         # --- SSE Helper functions ---
         def send_event(data):
-            """Safely serializes data and yields an SSE formatted event."""
             try:
                 payload = json.dumps(data)
                 yield f"data: {payload}\n\n"
             except TypeError as e:
                 print(f"Error serializing data for SSE: {e}. Data: {data}")
                 try:
-                    # Attempt to send a safe error message back
                     safe_data = {'type': data.get('type', 'error'), 'message': f"Serialization Error: {e}"}
                     payload = json.dumps(safe_data)
                     yield f"data: {payload}\n\n"
-                except Exception: # Fallback if even error serialization fails
+                except Exception:
                     yield "data: {\"type\": \"error\", \"message\": \"Internal server error during SSE event serialization.\"}\n\n"
 
         def send_progress(message, is_error=False, is_fatal=False):
-            """Sends a progress or error update event via SSE."""
             event_type = 'error' if is_error else 'progress'
             event_data = {'type': event_type, 'message': message}
             if is_error:
                 print(f"{'FATAL ' if is_fatal else ''}ERROR (SSE Stream): {message}")
-                event_data['fatal'] = is_fatal # Add fatal flag if applicable
+                event_data['fatal'] = is_fatal
             yield from send_event(event_data)
 
 
@@ -153,7 +142,6 @@ def stream():
             for i, step in enumerate(research_plan):
                  yield from send_progress(f"  Step {i+1}: {step['step']} (Keywords: {step.get('keywords', 'N/A')})")
 
-
             # === Step 2a: Search and Collect URLs ===
             yield from send_progress("Starting web search...")
             start_search_time = time.time()
@@ -181,7 +169,7 @@ def stream():
                 yield from send_progress(f"  -> Found {len(step_urls)} URLs for step keywords, {new_urls_count} new. Total unique URLs so far: {len(all_urls_from_search_step)}.")
 
                 if i < len(research_plan) - 1:
-                    time.sleep(config.INTER_SEARCH_DELAY_SECONDS) # Avoid hitting search rate limits
+                    time.sleep(config.INTER_SEARCH_DELAY_SECONDS)
 
             search_duration = time.time() - start_search_time
             yield from send_progress(f"Search phase completed in {search_duration:.2f}s.")
@@ -214,12 +202,11 @@ def stream():
                  yield from send_progress("No suitable URLs found to scrape after search and filtering. Cannot proceed.", is_error=True, is_fatal=True)
                  return
 
-
             # === Step 2b: Scrape URLs Concurrently ===
             yield from send_progress(f"Starting concurrent scraping ({config.MAX_WORKERS} workers)...")
             start_scrape_time = time.time()
-            scraped_source_metadata_list = [] # Reset list for this request
-            temp_files_to_clean = []          # Reset list for this request
+            scraped_source_metadata_list = []
+            temp_files_to_clean = []
             processed_scrape_count = 0
             successful_scrape_count = 0
 
@@ -229,13 +216,11 @@ def stream():
                     url = future_to_url[future]
                     processed_scrape_count += 1
                     try:
-                        # result_dict is {'url': url, 'temp_filepath': path} or None
                         result_dict = future.result()
                         if result_dict and 'temp_filepath' in result_dict:
                             scraped_source_metadata_list.append(result_dict)
-                            temp_files_to_clean.append(result_dict['temp_filepath']) # Add path for cleanup
+                            temp_files_to_clean.append(result_dict['temp_filepath'])
                             successful_scrape_count += 1
-                        # else: result was None (filtered or scrape error)
                     except Exception as exc:
                         yield from send_progress(f"    -> Scrape Error for {url[:60]}...: {escape(str(exc))}", is_error=True)
 
@@ -250,16 +235,13 @@ def stream():
                 yield from send_progress("Failed to scrape any content successfully. Cannot proceed with synthesis.", is_error=True, is_fatal=True)
                 return
 
-            # Ensure order matches original scrape list if needed (useful for consistent bibliography)
             scraped_url_map = {item['url']: item for item in scraped_source_metadata_list}
             ordered_scraped_metadata_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
             scraped_source_metadata_list = ordered_scraped_metadata_list
 
-
             # === Step 3: Generate Bibliography Map ===
             url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_source_metadata_list)
             yield from send_progress(f"Generated bibliography map for {len(url_to_index_map)} successfully scraped sources.")
-
 
             # === Step 4: Synthesize Information (Streaming) ===
             yield from send_progress(f"Synthesizing information from scraped content using {config.GOOGLE_MODEL_NAME}...")
@@ -286,23 +268,19 @@ def stream():
                      if current_chars + file_size <= config.MAX_CONTEXT_CHARS:
                          with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                              content = f.read()
-
                          if content:
                               context_for_llm_structured.append({'url': url, 'content': content})
                               current_chars += file_size
                               sources_included_count += 1
                          else:
                               yield from send_progress(f"  -> Warning: Read empty content from temp file {os.path.basename(filepath)} for {url[:60]}...", is_error=True)
-
                      else:
                           yield from send_progress(f"  -> Context limit ({config.MAX_CONTEXT_CHARS // 1000}k chars) likely reached. Preparing synthesis using first {sources_included_count}/{len(scraped_source_metadata_list)} sources.", is_error=True)
                           break
-
                 except OSError as e:
                      yield from send_progress(f"  -> Error accessing temp file {os.path.basename(filepath)} for {url[:60]}...: {e}", is_error=True)
                 except Exception as e:
                      yield from send_progress(f"  -> Unexpected error reading temp file {os.path.basename(filepath)} for {url[:60]}...: {e}", is_error=True)
-
 
             estimated_tokens = current_chars / config.CHARS_PER_TOKEN_ESTIMATE
             yield from send_progress(f"  -> Synthesizing based on {sources_included_count} sources (~{current_chars // 1000}k chars / ~{estimated_tokens / 1000:.1f}k estimated tokens).")
@@ -330,7 +308,7 @@ def stream():
             7. Output ONLY the synthesized Markdown content structured by plan steps. Do NOT include an introduction, conclusion, summary, or bibliography in this output.
             """
 
-            accumulated_synthesis_md = "" # Store raw markdown from synthesis stream
+            accumulated_synthesis_md = ""
             synthesis_stream_error = None
             try:
                 stream_generator = stream_gemini(synthesis_prompt)
@@ -356,7 +334,6 @@ def stream():
             yield from send_progress("Synthesis generation finished.")
             if not accumulated_synthesis_md.strip() and not synthesis_stream_error:
                  yield from send_progress("Warning: Synthesis resulted in empty content. The final report might lack detailed findings.", is_error=True)
-
 
             # === Step 5: Generate Final Report (Streaming) ===
             yield from send_progress(f"Generating final report using {config.GOOGLE_MODEL_NAME}...")
@@ -410,12 +387,12 @@ def stream():
                 *   Each footnote definition **must** be on its own line.
                 *   Ensure the numbers `N` match those used in the Findings section.
                 *   If the Bibliography Map was empty, simply state "No sources were cited in this report." under the heading.
-            6.  **Formatting:** Use standard Markdown for clarity (headings, lists, bold, italics, paragraphs). Ensure proper spacing between sections and paragraphs.
+            6.  **Formatting:** Use standard Markdown for clarity (headings, lists, bold, italics, paragraphs). Ensure proper spacing between sections and paragraphs. Use bullet points (`*` or `-`) for lists where appropriate.
             7.  **Output:** Generate ONLY the complete Markdown report according to these instructions. Do not include any preliminary remarks, explanations, or text outside the defined report structure.
 
             Generate the Markdown report now for topic: "{topic}".
             """
-            final_report_markdown = "" # Store the final markdown report stream
+            final_report_markdown = ""
             report_stream_error = None
             try:
                 stream_generator = stream_gemini(report_prompt)
@@ -445,27 +422,29 @@ def stream():
 
 
             # === Step 6: Final Processing and Completion ===
-            yield from send_progress("Processing final report for display and download...")
+            yield from send_progress("Processing final report for display...")
 
             # Convert final Markdown to HTML
+            # Add print statements to debug the content before/after conversion
+            # print(f"DEBUG [app.py]: Final Markdown before conversion (first 500 chars):\n{final_report_markdown[:500]}\n---")
             report_html = convert_markdown_to_html(final_report_markdown)
-            if report_html.startswith("<pre>Error during Markdown conversion"):
-                yield from send_progress("Error: Failed to convert final Markdown report to HTML for display.", is_error=True)
-                report_html = f"<h2>Report Display Error</h2><p>Could not convert report Markdown to HTML. Displaying raw Markdown:</p><pre><code>{escape(final_report_markdown)}</code></pre>"
+            # print(f"DEBUG [app.py]: Converted HTML (first 500 chars):\n{report_html[:500]}\n---")
 
-
-            # --- REMOVED: Raw data preview generation ---
-            # (The code block generating raw_data_preview_list and raw_data_preview was here)
+            # Check if conversion returned an error message (starts with <pre><strong>Error...)
+            if report_html.strip().lower().startswith(('<pre><strong>error', '<p><em>markdown conversion resulted', '<p><em>report content is empty')):
+                yield from send_progress("Error: Failed to convert final Markdown report to HTML for display. See logs for details.", is_error=True)
+                # The report_html already contains the error message/fallback from the utility function
+            elif not report_html.strip():
+                 yield from send_progress("Error: Markdown conversion resulted in empty HTML without specific error message.", is_error=True)
+                 report_html = f"<h2>Report Display Error</h2><p>Could not convert report Markdown to HTML. The conversion resulted in empty content.</p><p>Raw Markdown was:</p><pre><code>{escape(final_report_markdown)}</code></pre>"
 
 
             # Send final data package to the client
             yield from send_progress("Sending final results to client...")
             final_data = {
                 'type': 'complete',
-                'report_html': report_html,
-                'report_markdown': final_report_markdown,
-                # 'raw_scraped_data_preview': raw_data_preview, # REMOVED THIS LINE
-                'docx_available': DOCX_CONVERSION_AVAILABLE
+                'report_html': report_html
+                # Removed report_markdown, raw_scraped_data_preview, docx_available
             }
             yield from send_event(final_data)
 
@@ -489,7 +468,6 @@ def stream():
                          if os.path.exists(fpath):
                               os.remove(fpath)
                               cleaned_count += 1
-                         # else: Already removed or never created properly
                      except OSError as e:
                          print(f"  Warning: Failed to remove temp file {os.path.basename(fpath)}: {e}")
                          failed_count += 1
@@ -509,63 +487,7 @@ def stream():
     return Response(stream_with_context(generate_updates()), headers=headers)
 
 
-@app.route('/download_docx', methods=['POST'])
-def download_docx():
-    """Converts the received Markdown report to DOCX and sends it as a download."""
-    if not DOCX_CONVERSION_AVAILABLE: # Use the imported flag
-        print("Error [/download_docx]: Attempted download when DOCX conversion is unavailable.")
-        return jsonify({"success": False, "message": "DOCX download failed: The required 'html2docx' library is not installed or loaded on the server."}), 400
-
-    markdown_content = request.form.get('markdown_report') # Get raw markdown from hidden input
-    topic = request.form.get('topic', 'Research_Report') # Get topic for filename
-
-    if not markdown_content:
-        print("Error [/download_docx]: No Markdown content received in the request.")
-        return jsonify({"success": False, "message": "Error: No report content was received for DOCX conversion."}), 400
-
-    try:
-        # 1. Convert Markdown to HTML first
-        print("Info [/download_docx]: Converting Markdown to HTML for DOCX generation...")
-        report_html = convert_markdown_to_html(markdown_content)
-        if not report_html or report_html.startswith("<pre>Error during Markdown conversion"):
-             print("Error [/download_docx]: Failed to convert provided Markdown to HTML before DOCX conversion.")
-             error_detail = "Markdown conversion failed."
-             if report_html.startswith("<pre>"):
-                 match = re.search(r"Error during Markdown conversion: (.*?)\n", report_html)
-                 if match: error_detail = match.group(1)
-             return jsonify({"success": False, "message": f"Error: Could not prepare report content for DOCX conversion. {error_detail}"}), 500
-
-        # 2. Convert HTML to DOCX
-        print("Info [/download_docx]: Converting HTML to DOCX...")
-        docx_buffer = convert_html_to_docx(report_html)
-        if docx_buffer is None:
-            print("Error [/download_docx]: The convert_html_to_docx utility returned None.")
-            return jsonify({"success": False, "message": "Error: Failed during the HTML to DOCX conversion process on the server."}), 500
-
-        # 3. Prepare filename
-        print("Info [/download_docx]: Preparing filename...")
-        safe_filename_topic = re.sub(r'[^\w\s-]', '', topic).strip()
-        safe_filename_topic = re.sub(r'[-\s]+', '_', safe_filename_topic)
-        filename_base = f"{safe_filename_topic}_Research_Report"
-        filename = f"{filename_base[:config.DOWNLOAD_FILENAME_MAX_LENGTH]}.docx"
-        print(f"Info [/download_docx]: Sending file as '{filename}'")
-
-        # 4. Send the buffer as a file download
-        return send_file(
-            docx_buffer,
-            as_attachment=True,
-            download_name=filename,
-            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        )
-
-    except ImportError:
-         print("Error [/download_docx]: html2docx library missing during conversion attempt (ImportError).")
-         return jsonify({"success": False, "message": "Internal Server Error: DOCX conversion library is unexpectedly missing."}), 500
-    except Exception as e:
-        print(f"ERROR [/download_docx]: An unexpected error occurred during DOCX download preparation:")
-        traceback.print_exc()
-        msg = f"An unexpected error occurred on the server during DOCX conversion: {escape(str(e))}"
-        return jsonify({"success": False, "message": msg}), 500
+# --- REMOVED download_docx route ---
 
 
 # --- Run the App ---
@@ -578,6 +500,4 @@ if __name__ == '__main__':
         sys.exit(1)
 
     print(f"INFO: Starting Flask server...")
-    # Use threaded=True for handling concurrent requests (like SSE + downloads) efficiently in development
-    # For production, prefer a proper WSGI server like Gunicorn or uWSGI behind a reverse proxy (like Nginx or Caddy)
     app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)
