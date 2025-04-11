@@ -9,10 +9,11 @@ import logging
 from typing import List, Dict, Tuple, Optional, Set, Any
 from urllib.parse import urlparse
 
-from bs4 import BeautifulSoup, SoupStrainer # Import SoupStrainer for potential optimization
-from duckduckgo_search import DDGS, DuckDuckGoSearchException
+from bs4 import BeautifulSoup, SoupStrainer
+# Remove DuckDuckGoSearchException from import
+from duckduckgo_search import DDGS
 
-import deep_research_app.config as config
+import config as config
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
@@ -39,42 +40,34 @@ def search_duckduckgo_provider(keywords: List[str], max_results: int) -> Dict[st
         logger.warning("DuckDuckGo search requested with empty keywords.")
         return {"engine": engine_name, "urls": [], "success": True, "error": None}
 
-    # DDGS library often handles internal retries, but we add an outer loop for robustness/logging.
-    max_outer_retries = 2 # Number of times we retry the whole operation
+    max_outer_retries = 2
     base_delay = config.DDGS_RETRY_DELAY_SECONDS
 
     logger.info(f"Searching {engine_name} for: '{query}' (max_results={max_results})")
 
     for attempt in range(max_outer_retries + 1):
+        error_msg = "Unknown error" # Default error message for the attempt
+        is_rate_limit = False # Flag for rate limit detection
         try:
-            # Use context manager for DDGS instance
-            with DDGS(timeout=20) as ddgs: # Timeout for the underlying HTTP requests
-                 # Fetch results using ddgs.text()
-                 # Note: max_results in ddgs.text might not be strictly enforced by DDG itself.
+            with DDGS(timeout=20) as ddgs:
                  results_iterator = ddgs.text(query, max_results=max_results)
-
-                 # Collect URLs from the iterator
                  urls = [r['href'] for r in results_iterator if r and isinstance(r, dict) and r.get('href')]
-
                  logger.info(f"{engine_name} search for '{query}' successful, found {len(urls)} URLs.")
                  return {"engine": engine_name, "urls": urls, "success": True, "error": None}
 
-        except DuckDuckGoSearchException as e:
-            # Specific exception from the library
-            error_msg = f"DuckDuckGoSearchException for '{query}' (Attempt {attempt+1}): {e}"
-            is_rate_limit = "Ratelimit" in str(e) or "429" in str(e) or "too many requests" in str(e).lower()
-            # logger.warning(error_msg) # Log the warning
+        # REMOVED the specific except DuckDuckGoSearchException block
 
         except Exception as e:
-            # Catch other potential exceptions (network errors, timeouts handled by DDGS timeout, etc.)
-            error_msg = f"Generic Error searching {engine_name} for '{query}' (Attempt {attempt+1}): {type(e).__name__} - {e}"
-            is_rate_limit = "429" in str(e) # Check for rate limit status in generic exceptions too
-            logger.warning(error_msg, exc_info=False) # Log as warning, avoid full trace unless debugging
+            # Catch other potential exceptions (network errors, timeouts, library internal errors)
+            error_msg = f"Error searching {engine_name} for '{query}' (Attempt {attempt+1}): {type(e).__name__} - {e}"
+            error_str_lower = str(e).lower()
+            is_rate_limit = "rate limit" in error_str_lower or "429" in error_str_lower or "too many requests" in error_str_lower
+            logger.warning(error_msg, exc_info=False) # Log as warning
 
         # --- Retry Logic ---
         if attempt < max_outer_retries:
              delay = base_delay * (2 ** attempt) # Exponential backoff
-             log_prefix = f"Rate limit suspected" if is_rate_limit else f"Error encountered"
+             log_prefix = "Rate limit suspected" if is_rate_limit else "Error encountered"
              logger.info(f"  -> {log_prefix} for {engine_name} search '{query}'. Retrying attempt {attempt + 2}/{max_outer_retries + 1} in {delay:.1f}s...")
              time.sleep(delay)
         else:
@@ -83,10 +76,14 @@ def search_duckduckgo_provider(keywords: List[str], max_results: int) -> Dict[st
              logger.error(final_error_msg)
              return {"engine": engine_name, "urls": [], "success": False, "error": final_error_msg}
 
-    # Fallback if loop finishes unexpectedly (shouldn't happen)
+    # Fallback if loop finishes unexpectedly
     logger.error(f"Unexpected exit from {engine_name} retry loop for query '{query}'.")
     return {"engine": engine_name, "urls": [], "success": False, "error": "Max retries reached unexpectedly."}
 
+
+# --- The rest of the web_research.py file remains the same ---
+# perform_web_search, _clean_text, scrape_url functions etc.
+# ... (keep the existing code below this point) ...
 
 def perform_web_search(keywords: List[str]) -> Tuple[List[str], List[str]]:
     """
@@ -347,14 +344,5 @@ def scrape_url(url: str) -> Optional[Dict[str, str]]:
              try:
                  temp_file_obj.close()
              except Exception: pass
-             # If an error occurred *before* successfully returning the dict,
-             # and the file was created, attempt cleanup here. This is a fallback;
-             # primary cleanup happens in app.py using the returned list.
-             # if temp_filepath and os.path.exists(temp_filepath):
-             #      try:
-             #          # Careful: only remove if we are certain it won't be returned successfully
-             #          # It's safer to rely on the main cleanup logic in app.py
-             #          pass # os.remove(temp_filepath)
-             #      except OSError: pass
 
     return None # Return None if any error prevented successful scraping and saving
