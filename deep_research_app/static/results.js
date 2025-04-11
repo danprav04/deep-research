@@ -39,42 +39,51 @@ document.addEventListener('DOMContentLoaded', () => {
         // Add a small delay to ensure DOM is fully updated after HTML injection
         setTimeout(() => {
             if (!reportDisplayDiv) return;
+            // Select links within the specific report display area
             const citationLinks = reportDisplayDiv.querySelectorAll('sup a[href^="#fn:"]');
             let appliedCount = 0;
             citationLinks.forEach(link => {
-                const footnoteId = link.getAttribute('href')?.substring(1); // Use optional chaining
-                if (!footnoteId) return;
+                try {
+                    // Decode URI component in case footnote IDs have special characters
+                    const footnoteId = decodeURIComponent(link.getAttribute('href')?.substring(1));
+                    if (!footnoteId) return;
 
-                const footnote = document.getElementById(footnoteId);
-                if (footnote) {
-                    // Clone to avoid modifying the original bibliography
-                    const clone = footnote.cloneNode(true);
-                    // Remove the backlink (↩) from the tooltip content
-                    const backlink = clone.querySelector('a[href^="#fnref:"]');
-                    if (backlink) { backlink.remove(); }
+                    // Find the footnote element using the decoded ID
+                    const footnote = document.getElementById(footnoteId);
+                    if (footnote) {
+                        // Clone to avoid modifying the original bibliography
+                        const clone = footnote.cloneNode(true);
+                        // Remove the backlink (↩) from the tooltip content
+                        const backlink = clone.querySelector('a[href^="#fnref:"]');
+                        if (backlink) { backlink.remove(); }
 
-                    // Get text content, clean up whitespace, trim
-                    let footnoteContent = clone.textContent?.replace(/\s+/g, ' ').trim() || '';
+                        // Get text content, clean up whitespace, trim
+                        let footnoteContent = clone.textContent?.replace(/\s+/g, ' ').trim() || '';
 
-                    // Limit tooltip length
-                    const maxTooltipLength = 250;
-                    if (footnoteContent.length > maxTooltipLength) {
-                         footnoteContent = footnoteContent.substring(0, maxTooltipLength) + '...';
+                        // Limit tooltip length
+                        const maxTooltipLength = 250;
+                        if (footnoteContent.length > maxTooltipLength) {
+                             footnoteContent = footnoteContent.substring(0, maxTooltipLength) + '...';
+                        }
+
+                        // Set PicoCSS tooltip attribute and ARIA label
+                        const tooltipText = footnoteContent || 'Citation details unavailable.';
+                        link.setAttribute('data-tooltip', tooltipText);
+                        link.setAttribute('aria-label', `Citation: ${tooltipText}`);
+                        appliedCount++;
+                    } else {
+                        // Footnote target not found
+                         link.setAttribute('data-tooltip', 'Citation details missing.');
+                         link.setAttribute('aria-label', 'Citation details missing.');
+                         console.warn(`Footnote target not found for ID: ${footnoteId}`);
                     }
-
-                    // Set PicoCSS tooltip attribute and ARIA label
-                    const tooltipText = footnoteContent || 'Citation details unavailable.';
-                    link.setAttribute('data-tooltip', tooltipText);
-                    link.setAttribute('aria-label', `Citation: ${tooltipText}`);
-                    appliedCount++;
-                } else {
-                    // Footnote target not found
-                     link.setAttribute('data-tooltip', 'Citation details missing.');
-                     link.setAttribute('aria-label', 'Citation details missing.');
-                     console.warn(`Footnote target not found for ID: ${footnoteId}`);
+                } catch (e) {
+                    console.error(`Error processing citation link ${link.getAttribute('href')}:`, e);
+                    link.setAttribute('data-tooltip', 'Error processing citation.');
+                    link.setAttribute('aria-label', 'Error processing citation.');
                 }
             });
-            console.log(`Citation tooltips applied to ${appliedCount} links.`);
+            console.log(`Citation tooltips applied to ${appliedCount} links within report.`);
         }, 150); // Delay of 150ms
     }
 
@@ -102,19 +111,70 @@ document.addEventListener('DOMContentLoaded', () => {
         // if (reportOutputContainer) reportOutputContainer.classList.add('hidden');
     }
 
-    function showFinalReport(htmlContent) {
+    // --- MODIFIED FUNCTION ---
+    function showFinalReport(reportContent) { // Renamed parameter for clarity
         hideStreamOutputs();
         if (finalReportDisplay) finalReportDisplay.classList.remove('hidden');
         if (reportDisplayDiv) {
-             // Use DOMPurify here if you were allowing more complex HTML from Markdown
-             // For now, assuming trusted Markdown conversion on the server
-             reportDisplayDiv.innerHTML = htmlContent || "<article><p><em>Error: Received empty report content.</em></p></article>";
-             addCitationTooltips(); // Apply tooltips AFTER content is injected
+            try {
+                let finalHtml = "<article><p><em>Error: Report content is empty or invalid.</em></p></article>"; // Default error message
+
+                if (reportContent && typeof reportContent === 'string') {
+                    // Check if marked library is loaded
+                    if (typeof marked === 'function') {
+                         // --- Convert Markdown to HTML using marked.js ---
+                         const rawHtml = marked.parse(reportContent);
+
+                         // --- Sanitize the generated HTML using DOMPurify ---
+                         // Configure DOMPurify to allow elements and attributes needed by PicoCSS tooltips and footnotes
+                         finalHtml = DOMPurify.sanitize(rawHtml, {
+                             USE_PROFILES: { html: true }, // Allow standard HTML elements
+                             ADD_ATTR: ['data-tooltip', 'aria-label', 'role'], // Allow tooltip/ARIA attributes
+                             ADD_TAGS: ['sup', 'section'], // Allow sup for citations, section for footnotes if needed
+                             // Ensure IDs are allowed for footnotes/references
+                             ALLOW_DATA_ATTR: true, // Allow data-* attributes generally
+                             FORCE_BODY: true // Ensure the output is wrapped in a body tag for safety if needed
+                         });
+
+                    } else {
+                        console.error("Marked.js library not loaded. Cannot render Markdown.");
+                        addProgress("Error: Markdown library not loaded. Cannot display final report correctly.", true);
+                        // Display raw content as a fallback, but warn the user
+                        finalHtml = `<article><p><em>Error: Markdown renderer is missing. Displaying raw content:</em></p><pre><code>${escapeHtml(reportContent)}</code></pre></article>`;
+                    }
+                }
+
+                reportDisplayDiv.innerHTML = finalHtml;
+                addCitationTooltips(); // Apply tooltips AFTER content is injected and sanitized
+
+            } catch (e) {
+                 console.error("Error rendering final report:", e);
+                 addProgress(`Error displaying final report: ${e.message}`, true);
+                 reportDisplayDiv.innerHTML = "<article><p><em>An error occurred while rendering the report. Please check the console.</em></p></article>";
+            }
+
+        } else {
+            console.error("Final report display area not found.");
+            addProgress("Error: Cannot find the area to display the final report.", true);
         }
     }
 
+    // Simple HTML escaping function for fallback display
+    function escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return unsafe
+             .replace(/&/g, "&")
+             .replace(/</g, "<")
+             .replace(/>/g, ">")
+             .replace(/"/g, '"')
+             .replace(/'/g, "'");
+     }
+
     function handleCompletion(eventData) {
         addProgress("Research complete. Processing final results...");
+        // Pass the content assumed to be Markdown to showFinalReport
+        // **IMPORTANT**: If the server *does* send HTML, you'd revert this.
+        // If the field name changes on the server (e.g., to 'report_markdown'), update 'report_html' here.
         showFinalReport(eventData.report_html);
         addProgress("Final report displayed. Process finished.");
         if (loader) loader.classList.add('hidden');
@@ -134,6 +194,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check if the report was displayed; if not, indicate potential incompletion.
         if (finalReportDisplay && finalReportDisplay.classList.contains('hidden')) {
             addProgress("Process stopped or terminated before final report was generated. Check logs for details.", true, true);
+            // Ensure report area shows an error if it's empty
+             if (reportDisplayDiv && !reportDisplayDiv.innerHTML.trim()) {
+                 reportDisplayDiv.innerHTML = "<article><p><em>Report generation was interrupted or failed.</em></p></article>";
+                 if (finalReportDisplay) finalReportDisplay.classList.remove('hidden'); // Show the error message area
+             }
         }
     }
 
@@ -159,6 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addProgress("Connection established. Starting research process...");
             clearStreamOutputs();
             if (finalReportDisplay) finalReportDisplay.classList.add('hidden'); // Hide final report area
+            if (reportDisplayDiv) reportDisplayDiv.innerHTML = '<p><em>Loading final report...</em></p>'; // Reset report area
             if (loader) loader.classList.remove('hidden'); // Show loader
         };
 
@@ -179,11 +245,21 @@ document.addEventListener('DOMContentLoaded', () => {
                                 eventSource.close();
                                 console.log("SSE connection closed by client due to fatal server error.");
                             }
+                             // Show error in report area if process fails fatally
+                            if (reportDisplayDiv && finalReportDisplay && finalReportDisplay.classList.contains('hidden')) {
+                                reportDisplayDiv.innerHTML = `<article><p><em>Report generation failed due to a fatal error: ${escapeHtml(eventData.message)}</em></p></article>`;
+                                finalReportDisplay.classList.remove('hidden');
+                                hideStreamOutputs();
+                            }
                         }
                         break;
                     case 'stream_start':
                         // Optional: Add status message above the specific stream output
                         const targetStart = eventData.target === 'synthesis' ? synthesisOutput : reportOutput;
+                        const streamStatus = eventData.target === 'synthesis'
+                            ? synthesisOutputContainer?.querySelector('.stream-status')
+                            : reportOutputContainer?.querySelector('.stream-status');
+                        if (streamStatus) streamStatus.innerHTML = `<em>Streaming ${eventData.target}... (Content will appear below)</em>`;
                         if(targetStart) targetStart.textContent = ''; // Clear previous content
                         addProgress(`Starting LLM ${eventData.target} stream...`);
                         break;
@@ -207,17 +283,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         eventSource.onerror = function(error) {
             console.error("SSE connection error:", error);
-            addProgress("Error connecting to the research stream. Server might be down, busy, or restarting. Please try again later.", true, true);
+            // Avoid adding duplicate fatal errors if one was already logged
+            const lastProgress = progressList?.lastElementChild?.textContent || "";
+            if (!lastProgress.includes("fatal") && !lastProgress.includes("Error connecting")) {
+                addProgress("Error connecting to the research stream. Server might be down, busy, or restarting. Please check connection or try again later.", true, true);
+            }
             if (loader) loader.classList.add('hidden');
             hideStreamOutputs(); // Hide stream outputs on connection error
-            if (eventSource) {
-                 // Don't automatically close on error, browser might retry
-                 // eventSource.close();
-            }
-             // Indicate failure if report wasn't shown
-            if (finalReportDisplay && finalReportDisplay.classList.contains('hidden')) {
+
+            // Indicate failure if report wasn't shown and connection truly failed
+             if (finalReportDisplay && finalReportDisplay.classList.contains('hidden')) {
                  addProgress("Could not complete research due to connection failure.", true, true);
+                 if (reportDisplayDiv) {
+                    reportDisplayDiv.innerHTML = "<article><p><em>Failed to connect to the research service. Please ensure it's running and accessible.</em></p></article>";
+                    finalReportDisplay.classList.remove('hidden'); // Show the error
+                 }
             }
+            // Note: The browser might attempt to reconnect automatically depending on the error.
+            // We don't explicitly close the eventSource here on *every* error.
         };
     }
 

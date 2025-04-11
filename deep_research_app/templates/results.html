@@ -7,6 +7,11 @@
     <link rel="stylesheet" href="{{ pico_css }}">
     <!-- Link the custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
+    <!-- Add DOMPurify for security when rendering HTML (highly recommended) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js" integrity="sha512-Jc5hbySyMxMMAQ6syj53DRrq+dDo3AELRcL3hUj9DJuX4JmK2MDS4wqW8LjPD4bpJm7j0M583tL8Xz1XdwfLQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- <<< Add Marked.js library >>> -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- <<< END Marked.js library >>> -->
 </head>
 <!-- Pass encoded topic to JS via data attribute -->
 <body data-encoded-topic="{{ encoded_topic | e }}">
