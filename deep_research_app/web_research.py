@@ -2,210 +2,359 @@
 import time
 import re
 import requests
-from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
 import concurrent.futures
-import config
-import tempfile # Added
-import os       # Added
+import tempfile
+import os
+import logging
+from typing import List, Dict, Tuple, Optional, Set, Any
+from urllib.parse import urlparse
 
-# --- Existing search functions (search_duckduckgo_provider, perform_web_search) remain the same ---
+from bs4 import BeautifulSoup, SoupStrainer # Import SoupStrainer for potential optimization
+from duckduckgo_search import DDGS, DuckDuckGoSearchException
 
-def search_duckduckgo_provider(keywords, max_results=config.MAX_SEARCH_RESULTS_PER_ENGINE_STEP):
-    """Performs a search on DuckDuckGo with retry."""
+import deep_research_app.config as config
+
+# Configure logger for this module
+logger = logging.getLogger(__name__)
+
+# --- Search Functions ---
+
+def search_duckduckgo_provider(keywords: List[str], max_results: int) -> Dict[str, Any]:
+    """
+    Performs a search on DuckDuckGo using the duckduckgo_search library with retry logic.
+
+    Args:
+        keywords: A list of keywords to form the search query.
+        max_results: The maximum number of results to retrieve.
+
+    Returns:
+        A dictionary containing:
+        {'engine': 'DuckDuckGo', 'urls': list_of_urls, 'success': bool, 'error': error_message_or_None}
+    """
     query = " ".join(keywords)
-    urls = []
+    urls: List[str] = []
+    engine_name = "DuckDuckGo"
+
     if not query:
-        return {"engine": "DuckDuckGo", "urls": [], "success": True, "error": None}
+        logger.warning("DuckDuckGo search requested with empty keywords.")
+        return {"engine": engine_name, "urls": [], "success": True, "error": None}
 
-    # DDGS has its own retry/backoff, but we add a layer for explicit control/logging
-    max_retries = 2 # Keep a local retry count for this specific function's logic
-    for attempt in range(max_retries + 1):
+    # DDGS library often handles internal retries, but we add an outer loop for robustness/logging.
+    max_outer_retries = 2 # Number of times we retry the whole operation
+    base_delay = config.DDGS_RETRY_DELAY_SECONDS
+
+    logger.info(f"Searching {engine_name} for: '{query}' (max_results={max_results})")
+
+    for attempt in range(max_outer_retries + 1):
         try:
-            # Increase timeout slightly as DDGS can sometimes be slow
-            with DDGS(timeout=20) as ddgs:
-                results = list(ddgs.text(query, max_results=max_results))
-                urls = [r['href'] for r in results if r and 'href' in r]
-                return {"engine": "DuckDuckGo", "urls": urls, "success": True, "error": None}
+            # Use context manager for DDGS instance
+            with DDGS(timeout=20) as ddgs: # Timeout for the underlying HTTP requests
+                 # Fetch results using ddgs.text()
+                 # Note: max_results in ddgs.text might not be strictly enforced by DDG itself.
+                 results_iterator = ddgs.text(query, max_results=max_results)
+
+                 # Collect URLs from the iterator
+                 urls = [r['href'] for r in results_iterator if r and isinstance(r, dict) and r.get('href')]
+
+                 logger.info(f"{engine_name} search for '{query}' successful, found {len(urls)} URLs.")
+                 return {"engine": engine_name, "urls": urls, "success": True, "error": None}
+
+        except DuckDuckGoSearchException as e:
+            # Specific exception from the library
+            error_msg = f"DuckDuckGoSearchException for '{query}' (Attempt {attempt+1}): {e}"
+            is_rate_limit = "Ratelimit" in str(e) or "429" in str(e) or "too many requests" in str(e).lower()
+            # logger.warning(error_msg) # Log the warning
+
         except Exception as e:
-            # Check for common rate limit indicators
-            is_rate_limit = "Ratelimit" in str(e) or "429" in str(e) or "202" in str(e)
-            if is_rate_limit and attempt < max_retries:
-                current_delay = config.DDGS_RETRY_DELAY_SECONDS * (2 ** attempt) # Exponential backoff
-                print(f"  -> DuckDuckGo Rate limit detected for '{query}'. Retrying attempt {attempt + 1}/{max_retries} in {current_delay:.1f}s...")
-                time.sleep(current_delay)
-                continue
-            else:
-                err_msg = f"Error searching DuckDuckGo for '{query}' (Attempt {attempt+1}): {e}"
-                if is_rate_limit:
-                    err_msg = f"Max retries reached for DuckDuckGo rate limit on '{query}'."
-                print(f"  -> {err_msg}")
-                return {"engine": "DuckDuckGo", "urls": [], "success": False, "error": err_msg}
+            # Catch other potential exceptions (network errors, timeouts handled by DDGS timeout, etc.)
+            error_msg = f"Generic Error searching {engine_name} for '{query}' (Attempt {attempt+1}): {type(e).__name__} - {e}"
+            is_rate_limit = "429" in str(e) # Check for rate limit status in generic exceptions too
+            logger.warning(error_msg, exc_info=False) # Log as warning, avoid full trace unless debugging
 
-    # Should not be reached if logic is correct, but provides a fallback
-    return {"engine": "DuckDuckGo", "urls": [], "success": False, "error": "Max retries reached unexpectedly."}
+        # --- Retry Logic ---
+        if attempt < max_outer_retries:
+             delay = base_delay * (2 ** attempt) # Exponential backoff
+             log_prefix = f"Rate limit suspected" if is_rate_limit else f"Error encountered"
+             logger.info(f"  -> {log_prefix} for {engine_name} search '{query}'. Retrying attempt {attempt + 2}/{max_outer_retries + 1} in {delay:.1f}s...")
+             time.sleep(delay)
+        else:
+             # Max retries reached
+             final_error_msg = f"Max retries reached for {engine_name} search '{query}'. Last error: {error_msg}"
+             logger.error(final_error_msg)
+             return {"engine": engine_name, "urls": [], "success": False, "error": final_error_msg}
 
-def perform_web_search(keywords):
+    # Fallback if loop finishes unexpectedly (shouldn't happen)
+    logger.error(f"Unexpected exit from {engine_name} retry loop for query '{query}'.")
+    return {"engine": engine_name, "urls": [], "success": False, "error": "Max retries reached unexpectedly."}
+
+
+def perform_web_search(keywords: List[str]) -> Tuple[List[str], List[str]]:
     """
     Performs searches using configured providers and aggregates unique results.
-    """
-    all_unique_urls = set()
-    search_errors = []
 
-    # Define the search providers to use
+    Args:
+        keywords: List of keywords for the search query.
+
+    Returns:
+        A tuple containing:
+        - List of unique URLs found across all providers.
+        - List of error messages encountered during searches.
+    """
+    all_unique_urls: Set[str] = set()
+    search_errors: List[str] = []
+
+    # Define the search providers to use (currently only DuckDuckGo)
+    # Add more functions like search_google_provider, search_bing_provider here if implemented
     search_providers = [
         search_duckduckgo_provider,
-        # Add other provider functions here if implemented
     ]
 
+    # Can run providers concurrently if needed, but often sequential is fine for a few providers
+    # and avoids hitting rate limits across multiple services simultaneously.
     for i, provider_func in enumerate(search_providers):
-        # Pass the configured max results from config
+        # Pass the configured max results per step
         provider_result = provider_func(keywords, max_results=config.MAX_SEARCH_RESULTS_PER_ENGINE_STEP)
 
-        if provider_result["success"]:
-            new_urls = set(provider_result["urls"]) - all_unique_urls
-            all_unique_urls.update(provider_result["urls"])
-            # print(f"  -> {provider_result['engine']} found {len(provider_result['urls'])} URLs ({len(new_urls)} new).")
+        engine = provider_result.get("engine", "Unknown Engine")
+        if provider_result.get("success"):
+            provider_urls = provider_result.get("urls", [])
+            new_urls_found = len(set(provider_urls) - all_unique_urls)
+            all_unique_urls.update(provider_urls)
+            logger.debug(f"  -> {engine} found {len(provider_urls)} URLs ({new_urls_found} new). Total unique: {len(all_unique_urls)}")
         else:
-            print(f"  -> {provider_result['engine']} search failed: {provider_result['error']}")
-            search_errors.append(f"{provider_result['engine']}: {provider_result['error']}")
+            error_msg = provider_result.get("error", "Unknown search error")
+            logger.warning(f"  -> {engine} search failed: {error_msg}")
+            search_errors.append(f"{engine}: {error_msg}")
 
-        # Delay between different search providers if needed
-        if len(search_providers) > 1 and i < len(search_providers) - 1:
-             time.sleep(config.INTER_SEARCH_DELAY_SECONDS / 2) # Slightly shorter delay might be ok
+        # Optional delay between different search providers if using multiple
+        # if len(search_providers) > 1 and i < len(search_providers) - 1:
+        #      time.sleep(config.INTER_PROVIDER_SEARCH_DELAY) # Add this to config if needed
 
+    logger.info(f"Web search for keywords '{' '.join(keywords)}' completed. Found {len(all_unique_urls)} unique URLs. Encountered {len(search_errors)} errors.")
     return list(all_unique_urls), search_errors
 
-# --- Modified scrape_url function ---
-def scrape_url(url):
+
+# --- Scraping Function ---
+
+def _clean_text(soup: BeautifulSoup) -> str:
+    """Extracts and cleans text content from a BeautifulSoup object."""
+    # Remove common clutter elements
+    for element in soup(["script", "style", "nav", "footer", "aside", "header", "form", "button", "input", "textarea", "select", "img", "figure", "iframe", "video", "audio", "picture", "source", "noscript", "meta", "link", "svg", "canvas", "map", "area", "label"]):
+        element.decompose()
+
+    # Attempt to find main content areas (adapt selectors as needed)
+    main_content_selectors = [
+        'main',
+        'article',
+        {'role': 'main'},
+        {'class': re.compile(r'\b(content|main|post|entry|article[-_]body|body[-_]content)\b', re.I)},
+        {'id': re.compile(r'\b(content|main|story|article)\b', re.I)}
+    ]
+    text_content = ""
+    for selector in main_content_selectors:
+        main_area = soup.find(selector)
+        if main_area:
+            # logger.debug(f"Found main content area using selector: {selector}")
+            text_content = main_area.get_text(separator='\n', strip=True)
+            break # Use the first main content area found
+    else:
+        # Fallback to using the whole body if no specific main area is found
+        body = soup.find('body')
+        if body:
+            # logger.debug("No specific main content area found, falling back to body.")
+            text_content = body.get_text(separator='\n', strip=True)
+        else:
+            # Final fallback: all text if body tag is missing (unlikely for valid HTML)
+            logger.debug("No body tag found, falling back to all text.")
+            text_content = soup.get_text(separator='\n', strip=True)
+
+
+    # Clean up extracted text: remove excessive whitespace/newlines
+    lines = (line.strip() for line in text_content.splitlines())
+    # Further break down lines and remove empty chunks
+    chunks = [chunk for line in lines for phrase in line.split("  ") if (chunk := phrase.strip())]
+    # Join chunks with single newlines, filtering out very short chunks (likely noise)
+    cleaned_text = '\n'.join(chunk for chunk in chunks if len(chunk.split()) > 2) # Keep chunks with more than 2 words
+
+    return cleaned_text
+
+
+def scrape_url(url: str) -> Optional[Dict[str, str]]:
     """
-    Scrapes text content from a given URL. Handles common errors.
-    Saves content to a temporary file.
-    Returns a dictionary {'url': url, 'temp_filepath': path} on success, None on failure.
+    Scrapes text content from a given URL, saves it to a temporary file,
+    and returns metadata including the temp file path.
+
+    Designed to be memory-efficient for large pages by streaming the download
+    and limiting the total size read.
+
+    Args:
+        url: The URL to scrape.
+
+    Returns:
+        A dictionary {'url': url, 'temp_filepath': path} on success,
+        None if scraping fails, content is unsuitable, or an error occurs.
+        The caller is responsible for deleting the temporary file using the returned path.
     """
     log_url = url[:75] + '...' if len(url) > 75 else url
-    response = None
-    temp_file = None
-    temp_filepath = None
+    response: Optional[requests.Response] = None
+    temp_file_obj = None
+    temp_filepath: Optional[str] = None
 
     try:
-        headers = {'User-Agent': config.USER_AGENT}
-        response = requests.get(url, headers=headers, timeout=config.REQUEST_TIMEOUT, allow_redirects=True, stream=True)
-        response.raise_for_status()
-
-        content_type = response.headers.get('content-type', '').lower()
-        if 'html' not in content_type and 'text' not in content_type:
-            return None
-
-        content_length_str = response.headers.get('content-length')
-        max_bytes = config.MAX_SCRAPE_CONTENT_LENGTH_MB * 1024 * 1024
-
-        if content_length_str and int(content_length_str) > max_bytes:
-            return None
-
-        html_content = b""
-        for chunk in response.iter_content(chunk_size=8192):
-            html_content += chunk
-            if len(html_content) > max_bytes:
-                return None
-        response.close() # Close connection after reading
-
-        # Decode carefully
-        try:
-            detected_encoding = response.apparent_encoding or 'utf-8' # Use detected or fallback
-            html_content_str = html_content.decode(detected_encoding, errors='replace')
-        except Exception as decode_err:
-            print(f"Decoding error for {log_url}: {decode_err}. Trying utf-8 fallback.")
-            html_content_str = html_content.decode('utf-8', errors='replace')
-
-
-        try:
-            soup = BeautifulSoup(html_content_str, 'lxml')
-        except Exception:
-            try:
-                soup = BeautifulSoup(html_content_str, 'html.parser')
-            except Exception as parse_err:
-                print(f"Failed to parse HTML for {log_url}: {parse_err}")
-                return None
-
-        for element in soup(["script", "style", "nav", "footer", "aside", "header", "form", "button", "input", "textarea", "select", "img", "figure", "iframe", "video", "audio", "picture", "source", "noscript", "meta", "link", "svg", "canvas", "map", "area"]):
-            element.decompose()
-
-        main_content = (
-            soup.find('main') or
-            soup.find('article') or
-            soup.find('div', attrs={'role': 'main'}) or
-            # Relaxed content selection slightly if specific tags aren't found
-            soup.find('div', class_=re.compile(r'\b(content|main|post|entry|article[-_]body|body[-_]content)\b', re.I)) or
-            soup.find('div', id=re.compile(r'\b(content|main)\b', re.I))
+        headers = {'User-Agent': config.USER_AGENT, 'Accept': 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'}
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=config.REQUEST_TIMEOUT,
+            allow_redirects=True,
+            stream=True # <<< Critical for memory efficiency >>>
         )
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
-        if main_content:
-            text = main_content.get_text(separator='\n', strip=True)
-        else:
-            body = soup.find('body')
-            text = body.get_text(separator='\n', strip=True) if body else soup.get_text(separator='\n', strip=True)
+        # Check Content-Type - Ensure it's likely HTML or text
+        content_type = response.headers.get('content-type', '').lower()
+        if not ('html' in content_type or 'text' in content_type or 'xml' in content_type):
+            logger.debug(f"Skipping non-HTML/text URL ({content_type}): {log_url}")
+            response.close() # Close connection
+            return None
 
-        lines = (line.strip() for line in text.splitlines())
-        chunks = (' '.join(phrase.split()) for line in lines for phrase in line.split("  ") if phrase.strip())
-        cleaned_text = '\n'.join(chunk for chunk in chunks if chunk and len(chunk.split()) > 2)
+        # --- Stream content download and check size limit ---
+        html_content_bytes = b""
+        bytes_read = 0
+        max_bytes = config.MAX_SCRAPE_CONTENT_BYTES
 
+        for chunk in response.iter_content(chunk_size=8192): # Read in chunks
+            if not chunk: # Handle empty chunks if they occur
+                continue
+            bytes_read += len(chunk)
+            if bytes_read > max_bytes:
+                logger.warning(f"Content exceeds size limit ({max_bytes / 1024 / 1024:.1f} MB) for {log_url}. Skipping.")
+                response.close() # Important to close the connection
+                return None
+            html_content_bytes += chunk
+
+        # Close the response connection now that content is read (or limit exceeded)
+        response.close()
+        logger.debug(f"Downloaded {bytes_read / 1024:.1f} KB for {log_url}")
+
+        # --- Decode content carefully ---
+        html_content_str = ""
+        try:
+            # Use apparent_encoding (from headers/meta tags) or fallback to utf-8
+            detected_encoding = response.apparent_encoding or 'utf-8'
+            html_content_str = html_content_bytes.decode(detected_encoding, errors='replace')
+            logger.debug(f"Decoded content using {detected_encoding} for {log_url}")
+        except (UnicodeDecodeError, LookupError) as decode_err:
+            logger.warning(f"Decoding error ({decode_err}) for {log_url} with encoding '{detected_encoding}'. Trying utf-8 fallback.")
+            try:
+                html_content_str = html_content_bytes.decode('utf-8', errors='replace')
+                logger.debug(f"Successfully decoded content using utf-8 fallback for {log_url}")
+            except Exception as fallback_decode_err:
+                logger.error(f"UTF-8 fallback decoding failed for {log_url}: {fallback_decode_err}")
+                return None # Cannot decode content
+
+        if not html_content_str.strip():
+             logger.warning(f"Decoded content is empty or whitespace for {log_url}.")
+             return None
+
+        # --- Parse HTML using BeautifulSoup ---
+        # Optional optimization: Use SoupStrainer to parse only specific parts if known
+        # parse_only = SoupStrainer(['main', 'article', 'body']) # Example
+        try:
+            # Use lxml for speed if available, fallback to html.parser
+            soup = BeautifulSoup(html_content_str, 'lxml') # , parse_only=parse_only)
+        except Exception: # Catch errors during parsing (e.g., lxml not installed or malformed HTML)
+             try:
+                 logger.debug(f"lxml parser failed or not available for {log_url}, trying html.parser.")
+                 soup = BeautifulSoup(html_content_str, 'html.parser') # , parse_only=parse_only)
+             except Exception as parse_err:
+                 logger.error(f"Failed to parse HTML for {log_url} with both parsers: {parse_err}", exc_info=False)
+                 return None
+
+        # --- Extract and clean text ---
+        cleaned_text = _clean_text(soup)
+
+        # --- Check if meaningful content was extracted ---
         meaningful_word_count = len([word for word in cleaned_text.split() if len(word) > 1])
         if meaningful_word_count < config.MIN_MEANINGFUL_WORDS_PER_PAGE:
+            logger.debug(f"Extracted content too short ({meaningful_word_count} words) for {log_url}. Skipping.")
             return None
 
-        # --- Save to temporary file ---
+        # --- Save cleaned text to a temporary file ---
         if cleaned_text:
             try:
-                # Create a temporary file that won't be deleted automatically
-                # Use 'w+' for writing and potentially reading later if needed, though we only write here
-                temp_file = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix=".txt", prefix="scraped_")
-                temp_filepath = temp_file.name
-                temp_file.write(cleaned_text)
-                temp_file.close() # Close the file handle immediately after writing
-                # print(f"  -> Scraped {log_url} to {temp_filepath}") # Debug log
+                # Create a temporary file in the configured directory
+                # delete=False means the file persists after closing, caller must delete it.
+                temp_file_obj = tempfile.NamedTemporaryFile(
+                    mode='w',
+                    encoding='utf-8',
+                    delete=False, # <<< We need the path, so don't auto-delete
+                    suffix=".txt",
+                    prefix="scraped_",
+                    dir=config.TEMP_FILE_DIR # Use configured temp directory
+                )
+                temp_filepath = temp_file_obj.name
+                temp_file_obj.write(cleaned_text)
+                temp_file_obj.close() # Close the file handle immediately after writing
+
+                file_size_kb = os.path.getsize(temp_filepath) / 1024
+                logger.info(f"Successfully scraped {log_url} -> {os.path.basename(temp_filepath)} ({file_size_kb:.1f} KB)")
                 return {'url': url, 'temp_filepath': temp_filepath}
+
             except Exception as file_err:
-                print(f"Error writing temp file for {log_url}: {file_err}")
-                # Clean up if file was created but write failed or other error occurred
+                logger.error(f"Error writing temp file for {log_url}: {file_err}", exc_info=True)
+                # Clean up if file was created but write/close failed
                 if temp_filepath and os.path.exists(temp_filepath):
                     try:
                         os.remove(temp_filepath)
-                    except OSError: pass # Ignore cleanup error
-                return None
+                        logger.info(f"Cleaned up partially created temp file: {temp_filepath}")
+                    except OSError as cleanup_err:
+                        logger.error(f"Failed to clean up temp file {temp_filepath} after write error: {cleanup_err}")
+                return None # Failed to save content
         else:
-            # No meaningful content extracted
+            # No meaningful content extracted after cleaning
+            logger.debug(f"No meaningful content extracted after cleaning for {log_url}.")
             return None
 
+    # --- Exception Handling ---
     except requests.exceptions.Timeout:
-        print(f"Timeout error fetching URL {log_url}")
+        logger.warning(f"Timeout error fetching URL {log_url}")
     except requests.exceptions.HTTPError as e:
+        # Log client errors (4xx) as warnings, server errors (5xx) as errors
         if 400 <= e.response.status_code < 500:
-             pass # print(f"Client Error {e.response.status_code} fetching URL {log_url}")
+             logger.warning(f"HTTP Client Error {e.response.status_code} fetching URL {log_url}: {e}")
         else:
-            print(f"HTTP Server Error {e.response.status_code} fetching URL {log_url}: {e}")
+            logger.error(f"HTTP Server Error {e.response.status_code} fetching URL {log_url}: {e}")
+    except requests.exceptions.ConnectionError as e:
+         logger.warning(f"Connection Error fetching URL {log_url}: {e}")
     except requests.exceptions.RequestException as e:
-        print(f"Request Error fetching URL {log_url}: {e}")
+        # Catch other potential request errors (e.g., invalid URL, redirects)
+        logger.error(f"Request Error fetching URL {log_url}: {e}", exc_info=False)
     except Exception as e:
-        print(f"Unexpected Error processing URL {log_url}: {type(e).__name__} - {e}")
+        # Catch any other unexpected error during the process
+        logger.error(f"Unexpected Error processing URL {log_url}: {type(e).__name__} - {e}", exc_info=True)
+
+    # --- Cleanup in case of error ---
     finally:
+        # Ensure response is closed if it exists
         if response is not None:
             try:
                 response.close()
             except Exception:
-                pass
-        # Ensure temp file handle is closed if scrape_url exits unexpectedly before close
-        if temp_file is not None and not temp_file.closed:
+                pass # Ignore errors during close
+        # Ensure temp file handle is closed if opened but not closed due to error
+        if temp_file_obj is not None and not temp_file_obj.closed:
              try:
-                 temp_file.close()
+                 temp_file_obj.close()
              except Exception: pass
              # If an error occurred *before* successfully returning the dict,
-             # we should clean up the file if it exists.
-             if temp_filepath and os.path.exists(temp_filepath):
-                  # Check if the function is returning successfully or not.
-                  # This check is tricky here. Best practice is manual cleanup in app.py.
-                  # We *don't* remove it here if we plan to return the path.
-                  pass
+             # and the file was created, attempt cleanup here. This is a fallback;
+             # primary cleanup happens in app.py using the returned list.
+             # if temp_filepath and os.path.exists(temp_filepath):
+             #      try:
+             #          # Careful: only remove if we are certain it won't be returned successfully
+             #          # It's safer to rely on the main cleanup logic in app.py
+             #          pass # os.remove(temp_filepath)
+             #      except OSError: pass
 
-
-    return None # Return None if any error occurred before successful temp file write
+    return None # Return None if any error prevented successful scraping and saving

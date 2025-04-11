@@ -5,12 +5,31 @@
     /* Define base font size and line height for calculations */
     --pico-font-size: 112.5%; /* Slightly larger base font size (18px if base is 16px) */
     --pico-line-height: 1.7;  /* Generous line height for readability */
-    --pico-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    /* Keep Pico's default font stack, it's good */
+    /* --pico-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif; */
+
+    /* Custom Properties (optional) */
+    --report-max-width: 900px;
+    --code-background-color: #f4f4f8; /* Lighter code background */
+    --code-text-color: #333;
+    --blockquote-border-color: var(--pico-primary);
+    --blockquote-background-color: #f9f9f9;
+    --tooltip-background: #333;
+    --tooltip-text-color: #fff;
 }
+
+html[data-theme='dark'] {
+    --code-background-color: #2d3748; /* Darker code background */
+    --code-text-color: #e2e8f0;
+    --blockquote-background-color: #2a303c;
+    --tooltip-background: #eee;
+    --tooltip-text-color: #333;
+}
+
 
 body {
     padding-bottom: 5rem;
-    font-family: var(--pico-font-family);
+    /* font-family: var(--pico-font-family); Inherited */
     font-size: var(--pico-font-size);
     line-height: var(--pico-line-height);
     color: var(--pico-color);
@@ -19,7 +38,9 @@ body {
 
 /* Container for the main content */
 main.container {
-    max-width: 900px; /* Limit width for better readability on wide screens */
+    max-width: var(--report-max-width); /* Limit width */
+    padding-left: 1rem;  /* Add horizontal padding */
+    padding-right: 1rem;
 }
 
 /* --- Report Container Styling --- */
@@ -29,16 +50,16 @@ main.container {
     border: 1px solid var(--pico-card-border-color);
     border-radius: var(--pico-border-radius);
     background-color: var(--pico-card-background-color);
-    box-shadow: var(--pico-card-box-shadow);
+    box-shadow: var(--pico-box-shadow); /* Use consistent shadow */
 }
 
 /* --- Report Content Styling (#report-display) --- */
 #report-display {
     /* Basic text wrapping */
     overflow-wrap: break-word;
-    word-wrap: break-word;
-    word-break: break-word;
-    hyphens: auto;
+    word-wrap: break-word; /* Legacy fallback */
+    word-break: break-word; /* Allow breaking long words if needed */
+    hyphens: auto; /* Enable automatic hyphenation */
 }
 
 /* Ensure block elements allow wrapping */
@@ -48,9 +69,9 @@ main.container {
 #report-display h2,
 #report-display h3,
 #report-display blockquote {
-    overflow-wrap: break-word;
+    overflow-wrap: break-word; /* Redundant? Maybe not for all browsers */
     word-wrap: break-word;
-    word-break: break-word;
+    word-break: break-word; /* Ensure headings etc. can break */
 }
 
 /* --- Headings within the Report --- */
@@ -68,7 +89,7 @@ main.container {
 }
 
 #report-display h1 {
-    font-size: 2.4rem; /* ~43px */
+    font-size: clamp(1.8rem, 5vw, 2.4rem); /* Responsive font size */
     margin-top: 0; /* No top margin for first heading */
     margin-bottom: 1.8rem; /* More space after main title */
     padding-bottom: 0.6rem;
@@ -76,14 +97,14 @@ main.container {
 }
 
 #report-display h2 {
-    font-size: 1.8rem; /* ~32px */
+    font-size: clamp(1.5rem, 4vw, 1.8rem); /* Responsive font size */
     margin-top: 2.5rem; /* More space before H2 */
     padding-bottom: 0.4rem;
     border-bottom: 1px solid var(--pico-muted-border-color);
 }
 
 #report-display h3 {
-    font-size: 1.4rem; /* ~25px */
+    font-size: clamp(1.2rem, 3.5vw, 1.4rem); /* Responsive font size */
     margin-top: 2rem; /* More space before H3 */
     font-weight: 600; /* Slightly less bold than H1/H2 */
     color: var(--pico-h3-color); /* Use specific H3 color */
@@ -111,6 +132,7 @@ main.container {
 }
 #report-display li p { /* Paragraphs inside list items */
     margin-bottom: 0.5rem;
+    max-width: calc(75ch - 2rem); /* Adjust max-width for indentation */
 }
 
 
@@ -120,39 +142,46 @@ main.container {
     margin-right: 1rem;
     margin-bottom: 1.3rem;
     padding: 1rem 1.5rem;
-    border-left: 5px solid var(--pico-primary);
-    background-color: var(--pico-blockquote-background-color, var(--pico-code-background-color));
+    border-left: 5px solid var(--blockquote-border-color);
+    background-color: var(--blockquote-background-color);
     color: var(--pico-blockquote-color, inherit);
     font-style: italic;
+    border-radius: var(--pico-border-radius);
 }
 #report-display blockquote p {
     margin-bottom: 0.5rem;
     font-style: normal; /* Reset italic for paragraphs inside */
     max-width: none; /* Allow blockquote text to fill width */
 }
+#report-display blockquote p:last-child {
+    margin-bottom: 0;
+}
+
 
 /* Code block styling */
 #report-display pre {
     margin-bottom: 1.3rem;
     padding: 1rem;
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
+    white-space: pre-wrap; /* Wrap long lines */
+    overflow-wrap: break-word; /* Break long words/strings */
     word-wrap: break-word;
-    background-color: var(--pico-code-background-color);
-    color: var(--pico-code-color);
+    background-color: var(--code-background-color);
+    color: var(--code-text-color);
     border-radius: var(--pico-border-radius);
     border: 1px solid var(--pico-muted-border-color);
     font-size: 0.9em; /* Slightly smaller for code */
     line-height: 1.5;
+    overflow-x: auto; /* Add horizontal scroll if needed, though wrapping is preferred */
 }
 /* Inline code */
 #report-display code:not(pre code) {
-    background-color: var(--pico-code-background-color);
-    color: var(--pico-code-color);
+    background-color: var(--code-background-color);
+    color: var(--code-text-color);
     padding: 0.2em 0.4em;
     border-radius: 3px;
     font-size: 0.9em;
-    white-space: nowrap; /* Prevent inline code from wrapping mid-word */
+    white-space: normal; /* Allow inline code to wrap */
+    /* white-space: nowrap; */ /* Use this if you NEVER want inline code to wrap */
 }
 
 
@@ -160,32 +189,41 @@ main.container {
 #report-display table {
     margin-bottom: 1.5rem;
     width: 100%; /* Make table take full width */
+    border-collapse: collapse; /* Cleaner borders */
 }
 #report-display th, #report-display td {
     padding: 0.8rem 1rem; /* More padding in cells */
+    border: 1px solid var(--pico-muted-border-color); /* Add cell borders */
+}
+#report-display th {
+    background-color: var(--pico-table-header-background);
+    font-weight: bold;
+    text-align: left;
 }
 
 /* Horizontal Rule */
 #report-display hr {
     margin: 2.5rem 0; /* More vertical space around HR */
+    border: none; /* Remove default border */
     border-top: 1px solid var(--pico-muted-border-color);
 }
 
-/* --- Citation Styling & Interactivity --- */
+/* --- Citation Styling & Interactivity (Using Pico Tooltips) --- */
 #report-display sup a[href^="#fn:"] {
-    display: inline-block;
+    display: inline-block; /* Needed for padding etc. */
     padding: 0.1em 0.4em;
     margin: 0 0.1em;
     background-color: var(--pico-mark-background-color);
     color: var(--pico-mark-color);
-    border-radius: 3px;
+    border-radius: var(--pico-border-radius);
     text-decoration: none;
     font-size: 0.75em;
-    font-weight: 600; /* Less bold */
+    font-weight: 600;
     line-height: 1;
-    vertical-align: super;
+    vertical-align: super; /* Keep vertical alignment */
     transition: background-color 0.2s ease, color 0.2s ease;
     cursor: pointer;
+    border: 1px solid transparent; /* Add transparent border for focus */
 }
 
 #report-display sup a[href^="#fn:"]:hover,
@@ -193,7 +231,23 @@ main.container {
     background-color: var(--pico-primary-focus);
     color: var(--pico-primary-inverse);
     outline: none;
+    border-color: var(--pico-primary-hover); /* Show border on hover/focus */
 }
+
+/* Pico Tooltip Styling Override (optional) */
+[data-tooltip]::after {
+  background: var(--tooltip-background);
+  color: var(--tooltip-text-color);
+  border-radius: var(--pico-border-radius);
+  padding: 0.5rem 0.8rem;
+  font-size: 0.85em;
+  white-space: normal; /* Allow tooltips to wrap */
+  max-width: 300px; /* Limit tooltip width */
+  line-height: 1.5;
+  /* Add pointer */
+  /* content: attr(data-tooltip) "뾰"; */
+}
+
 
 /* --- Bibliography Styling --- */
 #report-display .footnotes {
@@ -204,49 +258,55 @@ main.container {
     color: var(--pico-muted-color);
 }
 
-#report-display .footnotes hr { display: none; }
+#report-display .footnotes hr { display: none; } /* Hide the default hr in footnotes section */
 #report-display .footnotes ol { padding-left: 0; list-style: none; }
 
 #report-display .footnotes li {
     margin-bottom: 0.8rem;
-    position: relative;
-    padding-left: 3.5em; /* More space for counter */
+    position: relative; /* For absolute positioning of counter */
+    padding-left: 3.5em; /* Space for the counter */
     line-height: 1.6; /* Better line height for potentially long URLs */
-    overflow-wrap: break-word;
+    overflow-wrap: break-word; /* Break long text/URLs */
     word-wrap: break-word;
-    word-break: break-all; /* Allow breaking long URLs */
+    word-break: break-all; /* Allow breaking long URLs anywhere */
 }
 
+/* Style the footnote counter (e.g., [1]) */
 #report-display .footnotes li::before {
-    content: "[" target-counter(attr(id, string), decimal) "]";
+    content: "[" target-counter(attr(id, string), decimal) "]"; /* Get number from id="fn:N" */
     position: absolute;
     left: 0;
     top: 0;
-    width: 3em; /* Adjust width */
+    width: 3em; /* Width of the counter area */
     text-align: right;
     padding-right: 0.5em;
     font-weight: bold;
     color: var(--pico-primary);
 }
 
-#report-display .footnotes li a { /* Style links within bibliography */
+/* Style links within bibliography items */
+#report-display .footnotes li a {
     color: var(--pico-primary);
     text-decoration: none;
+    word-break: break-all; /* Ensure links themselves can break */
 }
 #report-display .footnotes li a:hover,
 #report-display .footnotes li a:focus {
     text-decoration: underline;
+    outline: none;
 }
 
+/* Style the backlink (↩) */
 #report-display .footnotes li a[href^="#fnref:"] {
-    display: inline-block; /* Allow styling */
+    display: inline-block;
     margin-left: 0.6em;
     text-decoration: none;
     color: var(--pico-secondary);
     font-size: 0.9em;
-    padding: 0.1em 0.3em; /* Add slight padding */
-    border: 1px solid transparent; /* Prepare for focus */
+    padding: 0.1em 0.3em;
+    border: 1px solid transparent;
     border-radius: 3px;
+    transition: background-color 0.2s ease, color 0.2s ease;
 }
 #report-display .footnotes li a[href^="#fnref:"]:hover,
 #report-display .footnotes li a[href^="#fnref:"]:focus {
@@ -258,35 +318,44 @@ main.container {
 }
 
 
-/* --- REMOVED Download Actions Styling --- */
-/* #report-actions { ... } */
-
-
 /* --- Live Streaming Area Styling (Before Completion) --- */
 #report-container { margin-top: 1.5rem; }
+#synthesis-output-container, #report-output-container {
+    margin-bottom: 2rem;
+}
+
 #synthesis-output, #report-output {
-    min-height: 80px;
+    min-height: 100px; /* Slightly larger min-height */
+    max-height: 400px; /* Limit max height */
+    overflow-y: auto;  /* Enable scrolling */
     padding: 1rem;
     border: 1px dashed var(--pico-muted-border-color);
-    margin-bottom: 1.5rem;
-    white-space: pre-wrap;
+    margin-top: 0.5rem; /* Space below heading */
+    white-space: pre-wrap; /* Wrap text */
     overflow-wrap: break-word;
     word-wrap: break-word;
-    background-color: var(--pico-code-background-color);
-    font-family: var(--pico-font-family);
+    background-color: var(--code-background-color); /* Use code background */
+    font-family: var(--pico-font-family); /* Consistent font */
     font-size: 0.95em;
-    max-height: 400px;
-    overflow-y: auto;
-    color: var(--pico-muted-color);
+    line-height: 1.6; /* Improve readability */
+    color: var(--pico-muted-color); /* Start muted */
+    border-radius: var(--pico-border-radius);
 }
 #report-container h2 {
     margin-bottom: 0.5rem;
     font-size: 1.5rem;
     font-weight: bold;
+    border-bottom: none; /* Remove border from these temp headings */
 }
-#report-container p em {
+#report-container p.stream-status {
     font-size: 0.9em;
     color: var(--pico-muted-color);
+    margin-bottom: 0.5rem;
+    font-style: italic;
+}
+#report-container #synthesis-output:not(:empty),
+#report-container #report-output:not(:empty) {
+    color: var(--pico-color); /* Change color when content starts appearing */
 }
 
 /* --- Progress Log Styling --- */
@@ -294,22 +363,25 @@ main.container {
 #progress-list {
     max-height: 350px;
     overflow-y: auto;
-    background-color: var(--pico-background-color);
+    background-color: var(--pico-card-background-color); /* Match card background */
     padding: 15px;
     border-radius: var(--pico-border-radius);
     border: 1px solid var(--pico-muted-border-color);
     font-size: 0.9em;
     list-style: none;
-    padding-left: 15px;
+    padding-left: 15px; /* Remove default padding */
+    margin-bottom: 0; /* Remove default margin */
 }
 #progress-list li {
-    margin-bottom: 6px;
-    padding-left: 12px;
+    margin-bottom: 8px; /* Slightly more space */
+    padding-left: 15px; /* Space for icon/border */
     border-left: 3px solid var(--pico-secondary-border);
     word-wrap: break-word;
     overflow-wrap: break-word;
-    line-height: 1.5; /* Improve log readability */
+    line-height: 1.5;
+    position: relative; /* For potential icons */
 }
+/* Add icons or adjust border color for different types */
 #progress-list li.error {
     color: var(--pico-color-red);
     font-weight: 600;
@@ -319,8 +391,12 @@ main.container {
     color: var(--pico-color-red);
     font-weight: 700;
     border-left-color: var(--pico-color-red);
-    background-color: rgba(255, 0, 0, 0.05);
+    background-color: rgba(214, 69, 65, 0.1); /* Faint red background */
 }
+#progress-list li:last-child {
+    margin-bottom: 0;
+}
+
 
 /* Loader */
 .loader {
@@ -340,9 +416,21 @@ main.container {
 /* --- Media Queries for Responsiveness --- */
 @media (max-width: 768px) {
     :root { --pico-font-size: 106.25%; } /* ~17px base on mobile */
+    main.container { padding-left: 0.5rem; padding-right: 0.5rem; }
     #final-report-display { padding: 1.5rem 1rem; }
     #report-display h1 { font-size: 1.9rem; }
     #report-display h2 { font-size: 1.6rem; }
     #report-display h3 { font-size: 1.3rem; }
     #report-display p { max-width: none; } /* Remove char limit on mobile */
+    #report-display blockquote { margin-left: 0.5rem; margin-right: 0.5rem; }
+    #report-display .footnotes li { padding-left: 3em; }
+    #report-display .footnotes li::before { width: 2.5em; }
+}
+
+@media (max-width: 480px) {
+    :root { --pico-font-size: 100%; } /* 16px base on small mobile */
+    #final-report-display { padding: 1rem 0.8rem; }
+    #report-display h1 { font-size: 1.7rem; }
+    #report-display h2 { font-size: 1.4rem; }
+    #report-display h3 { font-size: 1.2rem; }
 }

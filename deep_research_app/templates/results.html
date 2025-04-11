@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light"> <!-- Default theme -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,13 +7,9 @@
     <link rel="stylesheet" href="{{ pico_css }}">
     <!-- Link the custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
-    <style>
-        /* Minimal inline styles */
-        body { padding-bottom: 5rem; }
-        .hidden { display: none !important; }
-    </style>
 </head>
-<body>
+<!-- Pass encoded topic to JS via data attribute -->
+<body data-encoded-topic="{{ encoded_topic | e }}">
     <main class="container">
         <nav aria-label="breadcrumb">
             <ul>
@@ -21,7 +17,9 @@
                 <li>Research Results</li>
             </ul>
         </nav>
-        <article> <!-- Wrap main content -->
+
+        <!-- Main content area -->
+        <article>
             <header>
                 <hgroup>
                     <h1>Researching: "{{ topic }}"</h1>
@@ -29,6 +27,7 @@
                 </hgroup>
             </header>
 
+            <!-- Progress Log Section -->
             <section id="progress-section" class="progress-log">
                 <h2>Progress Log <span id="loader" class="loader"></span></h2>
                 <ul id="progress-list">
@@ -39,13 +38,19 @@
             <!-- Container for Live Streaming Outputs (Hidden Initially) -->
             <section id="report-container" class="hidden">
                 <hr>
-                <h2>Live Synthesis Output</h2>
-                <p><em>Synthesizing information from sources... (Content will stream below)</em></p>
-                <div id="synthesis-output" aria-live="polite">Waiting for synthesis stream...</div>
+                <!-- Synthesis Output -->
+                <div id="synthesis-output-container">
+                    <h2>Live Synthesis Output</h2>
+                    <p class="stream-status"><em>Synthesizing information from sources... (Content will stream below)</em></p>
+                    <div id="synthesis-output" aria-live="polite" aria-atomic="false" role="log"></div>
+                </div>
 
-                <h2>Live Report Generation</h2>
-                <p><em>Generating the final report... (Content will stream below)</em></p>
-                <div id="report-output" aria-live="polite">Waiting for report stream...</div>
+                <!-- Report Output -->
+                <div id="report-output-container">
+                    <h2>Live Report Generation</h2>
+                    <p class="stream-status"><em>Generating the final report... (Content will stream below)</em></p>
+                    <div id="report-output" aria-live="polite" aria-atomic="false" role="log"></div>
+                </div>
             </section>
 
             <!-- Container for Final Report (Hidden Initially) -->
@@ -53,169 +58,22 @@
                 <hr>
                 <h2>Final Research Report</h2>
                 <!-- This div will hold the final, styled report HTML -->
-                <div id="report-display">
+                <div id="report-display" role="document">
                     <p><em>Loading final report...</em></p>
                 </div>
-
-                <!-- REMOVED: <div id="report-actions">...</div> -->
-
             </section>
+
         </article> <!-- End article wrap -->
 
     </main>
 
-    <!-- JavaScript -->
-    <script>
-        // JS Variables
-        const encodedTopic = "{{ encoded_topic | e }}";
-        const progressList = document.getElementById('progress-list');
-        const loader = document.getElementById('loader');
-        const reportContainer = document.getElementById('report-container');
-        const finalReportDisplay = document.getElementById('final-report-display');
-        const reportDisplayDiv = document.getElementById('report-display');
-        const synthesisOutput = document.getElementById('synthesis-output');
-        const reportOutput = document.getElementById('report-output');
-        // REMOVED: download button variables
-
-        let eventSource = null;
-
-        function addProgress(message, isError = false, isFatal = false) {
-            const li = document.createElement('li');
-            li.textContent = message;
-            if (isFatal) { li.classList.add('fatal-error'); }
-            else if (isError) { li.classList.add('error'); }
-            progressList.appendChild(li);
-            progressList.scrollTop = progressList.scrollHeight;
-        }
-
-        // Citation Tooltip Functionality
-        function addCitationTooltips() {
-             setTimeout(() => {
-                const citationLinks = reportDisplayDiv.querySelectorAll('sup a[href^="#fn:"]');
-                citationLinks.forEach(link => {
-                    const footnoteId = link.getAttribute('href').substring(1);
-                    const footnote = document.getElementById(footnoteId);
-                    if (footnote) {
-                        const clone = footnote.cloneNode(true);
-                        const backlink = clone.querySelector('a[href^="#fnref:"]');
-                        if (backlink) { backlink.remove(); }
-                        let footnoteContent = clone.textContent.replace(/\s+/g, ' ').trim();
-                        const maxTooltipLength = 250;
-                        if (footnoteContent.length > maxTooltipLength) {
-                             footnoteContent = footnoteContent.substring(0, maxTooltipLength) + '...';
-                        }
-                        link.setAttribute('data-tooltip', footnoteContent || 'Citation details unavailable.');
-                        link.setAttribute('aria-label', `Citation: ${footnoteContent || 'details unavailable'}`);
-                    } else {
-                         link.setAttribute('data-tooltip', 'Citation details missing.');
-                         link.setAttribute('aria-label', 'Citation details missing.');
-                    }
-                });
-                 console.log(`Citation tooltips applied to ${citationLinks.length} links.`);
-             }, 100);
-        }
-
-
-        function connectSSE() {
-            if (eventSource) { eventSource.close(); }
-            console.log(`Connecting to SSE stream at /stream?topic=${encodedTopic}`);
-            eventSource = new EventSource(`/stream?topic=${encodedTopic}`);
-
-            eventSource.onopen = function() {
-                console.log("SSE connection opened.");
-                progressList.innerHTML = '';
-                addProgress("Connection established. Starting research process...");
-                reportContainer.classList.remove('hidden');
-                synthesisOutput.textContent = "";
-                reportOutput.textContent = "";
-                loader.classList.remove('hidden');
-                finalReportDisplay.classList.add('hidden');
-            };
-
-            eventSource.onmessage = function(event) {
-                try {
-                    const eventData = JSON.parse(event.data);
-
-                    switch (eventData.type) {
-                        case 'progress':
-                            addProgress(eventData.message);
-                            break;
-                        case 'error':
-                            addProgress(eventData.message, true, eventData.fatal || false);
-                            if (eventData.fatal) {
-                                addProgress("Research stopped due to fatal error.", true, true);
-                                loader.classList.add('hidden');
-                                if(eventSource) eventSource.close();
-                            }
-                            break;
-                        case 'stream_start':
-                            if (eventData.target === 'synthesis') {
-                                synthesisOutput.textContent = "";
-                                synthesisOutput.style.color = 'inherit';
-                                addProgress("Starting LLM synthesis stream...");
-                            } else if (eventData.target === 'report') {
-                                reportOutput.textContent = "";
-                                reportOutput.style.color = 'inherit';
-                                addProgress("Starting LLM report generation stream...");
-                            }
-                            break;
-                        case 'llm_chunk':
-                            const targetElement = eventData.target === 'synthesis' ? synthesisOutput : reportOutput;
-                            targetElement.textContent += eventData.content;
-                            break;
-                        case 'complete':
-                            addProgress("Research complete. Processing final results...");
-                            reportContainer.classList.add('hidden');
-                            finalReportDisplay.classList.remove('hidden');
-
-                            // Inject the final HTML report
-                            reportDisplayDiv.innerHTML = eventData.report_html || "<article><p><em>Error: Received empty report HTML. Check progress log for details.</em></p></article>";
-
-                            // *** Add tooltips AFTER HTML is injected ***
-                            addCitationTooltips();
-
-                            addProgress("Final report displayed. Process finished.");
-                            loader.classList.add('hidden');
-                            if(eventSource) eventSource.close();
-                            break;
-                        case 'stream_terminated':
-                            addProgress("Server stream terminated.", false);
-                            loader.classList.add('hidden');
-                            if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-                                eventSource.close();
-                            }
-                            if (finalReportDisplay.classList.contains('hidden')) {
-                                addProgress("Process stopped before completion. Check logs for errors.", true, true);
-                            }
-                            break;
-                        default:
-                            console.warn("Received unknown SSE event type:", eventData.type);
-                    }
-                } catch (e) {
-                    console.error("Error parsing SSE message or processing event:", e);
-                    addProgress(`Client-side error processing update: ${e.message}`, true);
-                }
-            };
-
-            eventSource.onerror = function(error) {
-                console.error("SSE connection error:", error);
-                addProgress("Error connecting to the research stream. Server might be down or busy. Please try again.", true, true);
-                loader.classList.add('hidden');
-                if(eventSource) eventSource.close();
-                reportContainer.classList.add('hidden');
-                if (finalReportDisplay.classList.contains('hidden')) {
-                    addProgress("Could not complete research due to connection failure.", true, true);
-                }
-            };
-        }
-
-        // --- REMOVED Button Actions ---
-
-        // --- Initial Setup ---
-        document.addEventListener('DOMContentLoaded', () => {
-             connectSSE();
-        });
-
+    <!-- Link the separated JavaScript file -->
+    <script src="{{ url_for('static', filename='results.js') }}" defer></script>
+    <!-- Simple Theme Toggle Script (can be moved to a global JS file) -->
+     <script>
+        // Apply theme from localStorage on load
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', currentTheme);
     </script>
 </body>
 </html>

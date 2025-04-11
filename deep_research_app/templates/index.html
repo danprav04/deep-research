@@ -1,30 +1,89 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light"> <!-- Default theme -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Deep Research Input</title>
     <link rel="stylesheet" href="{{ pico_css }}">
     <style>
-        body { padding-bottom: 5rem; } /* Add some bottom padding */
-        main { margin-top: 2rem; }
-        form label { margin-bottom: 0.5rem; display: block; }
-        form button { margin-top: 1rem; }
+        body {
+            padding-top: 2rem;
+            padding-bottom: 5rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        main.container {
+            max-width: 700px; /* Limit width of form */
+            flex-grow: 1; /* Allow main to grow */
+        }
+        form label {
+            margin-bottom: 0.5rem;
+            display: block;
+            font-weight: bold;
+        }
+        form button {
+            margin-top: 1.5rem;
+            width: 100%; /* Make button full width */
+        }
+        footer {
+            margin-top: 3rem;
+            text-align: center;
+            font-size: 0.9em;
+            color: var(--pico-muted-color);
+        }
+        /* Simple theme toggle */
+        .theme-toggle { margin-top: 1rem; text-align: right; }
     </style>
 </head>
 <body>
     <main class="container">
+        <div class="theme-toggle">
+            <button id="theme-toggle-btn" data-tooltip="Switch Theme" data-placement="left">🌙</button>
+        </div>
         <hgroup>
             <h1>Deep Research Agent</h1>
-            <h2>Enter a topic to start the automated research process</h2>
+            <p>Enter a topic to start the automated research process. The agent will generate a plan, search the web, scrape sources, and synthesize a report.</p>
         </hgroup>
 
         <form action="{{ url_for('research_start') }}" method="post">
             <label for="topic">Research Topic:</label>
-            <input type="text" id="topic" name="topic" placeholder="e.g., The history and impact of the printing press" required>
-            <button type="submit">Start Research</button>
+            <input type="text" id="topic" name="topic" placeholder="e.g., The history and impact of the printing press" required aria-describedby="topic-help">
+            <small id="topic-help">Be specific for better results.</small>
+
+            <button type="submit" aria-busy="false">Start Research</button>
         </form>
 
     </main>
+
+    <footer>
+        Powered by Flask & Google Gemini
+    </footer>
+
+    <script>
+        // Simple Theme Toggle Logic
+        const themeToggleBtn = document.getElementById('theme-toggle-btn');
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', currentTheme);
+        themeToggleBtn.textContent = currentTheme === 'light' ? '🌙' : '☀️';
+
+        themeToggleBtn.addEventListener('click', () => {
+            let newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            themeToggleBtn.textContent = newTheme === 'light' ? '🌙' : '☀️';
+        });
+
+        // Prevent multiple submissions
+        const form = document.querySelector('form');
+        const submitButton = form.querySelector('button[type="submit"]');
+        form.addEventListener('submit', () => {
+            if (submitButton) {
+                submitButton.setAttribute('aria-busy', 'true');
+                submitButton.disabled = true;
+            }
+        });
+    </script>
+
 </body>
 </html>
