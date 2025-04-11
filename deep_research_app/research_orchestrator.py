@@ -41,7 +41,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
     """
     # --- Research state variables ---
     scraped_source_metadata_list: List[Dict[str, Any]] = []
-    # temp_files_to_clean is now managed by the caller (app.py) based on yielded events
     research_plan: List[Dict[str, Any]] = []
     accumulated_synthesis_md: str = ""
     final_report_markdown: str = ""
@@ -75,7 +74,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         """
         try:
             plan_response = call_gemini(plan_prompt)
-            # parse_research_plan handles basic validation and returns a list or error dict
             research_plan = parse_research_plan(plan_response)
             if not research_plan or (len(research_plan) == 1 and research_plan[0]["step"].startswith("Failed")):
                  fail_reason = research_plan[0]["step"] if research_plan else "Could not parse plan structure from LLM."
@@ -119,7 +117,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
             if step_errors:
                 total_search_errors += len(step_errors)
                 for err in step_errors:
-                    # Report non-fatal search errors
                     yield {'type': 'progress', 'message': f"    -> Search Warning: {err}", 'is_error': True, 'is_fatal': False}
 
             new_urls_count = len(set(step_urls) - all_urls_from_search_step)
@@ -177,10 +174,7 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
                     if result_dict and 'temp_filepath' in result_dict and result_dict['temp_filepath']:
                         scraped_source_metadata_list.append(result_dict)
                         successful_scrape_count += 1
-                        # Yield success event with metadata including the temp file path
                         yield {'type': 'scrape_success', 'metadata': result_dict}
-                    # else: logger.debug(f"Scrape returned None for: {url}")
-
                 except Exception as exc:
                     logger.error(f"Error during scraping task for {url[:70]}...: {exc}", exc_info=False)
                     yield {'type': 'progress', 'message': f"    -> Scrape Error for {url[:60]}...: {escape(str(exc))}", 'is_error': True, 'is_fatal': False}
@@ -208,7 +202,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
 
         # === Step 4: Synthesize Information (Streaming, RAM Optimized) ===
         yield {'type': 'progress', 'message': f"Synthesizing information from {len(scraped_source_metadata_list)} scraped sources using {config.GOOGLE_MODEL_NAME}...", 'is_error': False, 'is_fatal': False}
-        # Yield event to signal start of synthesis stream
         yield {'type': 'event', 'data': {'type': 'stream_start', 'target': 'synthesis'}}
 
         context_for_llm_parts = []
@@ -264,7 +257,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
 
         try:
             context_json_str = json.dumps(context_for_llm_parts, indent=2, ensure_ascii=False)
-            # Clear the large list from memory once JSON string is created
             del context_for_llm_parts
         except Exception as json_err:
             logger.error(f"Failed to serialize context parts to JSON: {json_err}", exc_info=True)
@@ -294,7 +286,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         6. Use `---` as a separator ONLY between the synthesis for different plan steps.
         7. Output ONLY the synthesized Markdown content structured by plan steps. Do NOT include an introduction, conclusion, summary, or bibliography in this output. Focus solely on presenting the synthesized findings per step with citations.
         """
-        # Context JSON no longer needed in memory after prompt creation
         del context_json_str
 
         accumulated_synthesis_md = ""
@@ -303,7 +294,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
             stream_generator = stream_gemini(synthesis_prompt)
             for result in stream_generator:
                 if result['type'] == 'chunk':
-                    # Yield LLM chunk event
                     yield {'type': 'event', 'data': {'type': 'llm_chunk', 'content': result['content'], 'target': 'synthesis'}}
                     accumulated_synthesis_md += result['content']
                 elif result['type'] == 'stream_error':
@@ -365,8 +355,7 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
            {truncated_synthesis_md if truncated_synthesis_md.strip() else "No synthesized information was generated or provided."}
            ```
         3. A Bibliography Map (mapping URLs to citation numbers):
-           ```
-           {bibliography_prompt_list if bibliography_prompt_list else "No sources available for bibliography."}
+           ```           {bibliography_prompt_list if bibliography_prompt_list else "No sources available for bibliography."}
            ```
 
         **Instructions for Generating the Final Markdown Report:**
@@ -396,7 +385,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
 
         Generate the Markdown report now for topic: "{topic}".
         """
-        # Synthesis markdown no longer needed after creating prompt
         del accumulated_synthesis_md
         del truncated_synthesis_md
 
@@ -440,15 +428,42 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
 
         # === Step 6: Final Processing and Completion ===
         yield {'type': 'progress', 'message': "Processing final report for display...", 'is_error': False, 'is_fatal': False}
+
+        # --- <<< ADD SERVER-SIDE FIX: Strip potential Markdown code fences >>> ---
+        cleaned_report_markdown = final_report_markdown.strip() # Initial strip for easier checking
+        fence_start_md = "```markdown\n"
+        fence_start_simple = "```\n"
+        fence_end = "\n```"
+        fence_end_simple = "```"
+
+        was_stripped = False
+        if cleaned_report_markdown.startswith(fence_start_md) and cleaned_report_markdown.endswith(fence_end):
+            cleaned_report_markdown = cleaned_report_markdown[len(fence_start_md):-len(fence_end)].strip()
+            was_stripped = True
+        elif cleaned_report_markdown.startswith(fence_start_simple) and cleaned_report_markdown.endswith(fence_end):
+            cleaned_report_markdown = cleaned_report_markdown[len(fence_start_simple):-len(fence_end)].strip()
+            was_stripped = True
+        elif cleaned_report_markdown.startswith(fence_end_simple) and cleaned_report_markdown.endswith(fence_end_simple): # Handles ``` only case
+             cleaned_report_markdown = cleaned_report_markdown[len(fence_end_simple):-len(fence_end_simple)].strip()
+             was_stripped = True
+
+        if was_stripped:
+             logger.info("Stripped surrounding Markdown code fences from the final report content before sending.")
+             final_report_markdown = cleaned_report_markdown # Use the cleaned version
+        # --- <<< END SERVER-SIDE FIX >>> ---
+
+        # Convert the (potentially cleaned) Markdown to HTML
         report_html = convert_markdown_to_html(final_report_markdown)
 
         if report_html.strip().lower().startswith(('<pre><strong>error', '<p><em>markdown conversion resulted', '<p><em>report content is empty')):
             logger.error("Failed to convert final Markdown report to HTML for display.")
             yield {'type': 'progress', 'message': "Error converting final report Markdown to HTML. Displaying raw Markdown.", 'is_error': True, 'is_fatal': False}
+            # Send the raw (but cleaned) markdown if HTML conversion fails
             report_html = f"<h2>Report Display Error</h2><p>Could not convert report Markdown to HTML. Raw Markdown content:</p><pre><code>{escape(final_report_markdown)}</code></pre>"
         elif not report_html.strip():
              logger.error("Markdown conversion resulted in empty HTML without specific error message.")
              yield {'type': 'progress', 'message': "Error: Markdown conversion resulted in empty HTML.", 'is_error': True, 'is_fatal': False}
+             # Send the raw (but cleaned) markdown if HTML conversion results in nothing
              report_html = f"<h2>Report Display Error</h2><p>Markdown conversion resulted in empty content. Raw Markdown content:</p><pre><code>{escape(final_report_markdown)}</code></pre>"
 
         # Yield final data package to the client
@@ -456,6 +471,8 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         final_data = {
             'type': 'complete',
             'report_html': report_html
+            # Note: Consider sending raw 'report_markdown': final_report_markdown as well
+            # if you want the client to *always* have the raw source, regardless of HTML conversion.
         }
         yield {'type': 'event', 'data': final_data}
 
@@ -465,17 +482,14 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         yield {'type': 'progress', 'message': f"Research process completed successfully in {total_duration:.2f} seconds.", 'is_error': False, 'is_fatal': False}
 
     except Exception as e:
-        # Catch any *other* unexpected errors in the main orchestration workflow
         logger.error(f"FATAL: Unhandled exception in research orchestrator for topic '{topic}': {e}", exc_info=True)
         error_msg = f"Unexpected server error during research orchestration: {type(e).__name__} - {escape(str(e))}"
-        # Yield final fatal error message if possible
-        if not fatal_error_occurred: # Avoid sending duplicate fatal errors
+        if not fatal_error_occurred:
             try:
                  yield {'type': 'progress', 'message': error_msg, 'is_error': True, 'is_fatal': True}
             except Exception as callback_err:
                  logger.error(f"Failed to yield final fatal error message: {callback_err}")
     finally:
-        # Log completion or failure
         if not fatal_error_occurred:
             logger.info("Orchestrator generator finished.")
         else:

@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elements ---
     const progressList = document.getElementById('progress-list');
     const loader = document.getElementById('loader');
-    const reportContainer = document.getElementById('report-container'); // Contains both stream outputs
+    const reportContainer = document.getElementById('report-container');
     const synthesisOutputContainer = document.getElementById('synthesis-output-container');
     const reportOutputContainer = document.getElementById('report-output-container');
     const synthesisOutput = document.getElementById('synthesis-output');
@@ -27,14 +27,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function addProgress(message, isError = false, isFatal = false) {
         if (!progressList) return;
         const li = document.createElement('li');
-        li.textContent = message; // Basic escaping
+        li.textContent = message;
         if (isFatal) {
             li.classList.add('fatal-error');
         } else if (isError) {
             li.classList.add('error');
         }
         progressList.appendChild(li);
-        progressList.scrollTop = progressList.scrollHeight; // Auto-scroll
+        progressList.scrollTop = progressList.scrollHeight;
     }
 
     function addCitationTooltips() {
@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const element = target === 'synthesis' ? synthesisOutput : reportOutput;
         if (element) {
             element.textContent += content;
-            element.scrollTop = element.scrollHeight; // Auto-scroll
+            element.scrollTop = element.scrollHeight;
         }
     }
 
@@ -95,50 +95,50 @@ document.addEventListener('DOMContentLoaded', () => {
         if (reportContainer) reportContainer.classList.add('hidden');
     }
 
-    function showFinalReport(reportContent) {
+    // --- MODIFIED: Assumes reportContent is HTML or potentially raw Markdown if conversion failed server-side ---
+    function showFinalReport(reportHtmlContent) { // Parameter name reflects expectation
         hideStreamOutputs();
         if (finalReportDisplay) finalReportDisplay.classList.remove('hidden');
         if (reportDisplayDiv) {
             try {
-                let finalHtml = "<article><p><em>Error: Report content is empty or invalid.</em></p></article>";
+                let finalHtml = "<article><p><em>Error: Received empty report content.</em></p></article>"; // Default error message
 
-                if (reportContent && typeof reportContent === 'string') {
-                    // Check if the necessary functions are available
-                    if (typeof marked?.parse === 'function' && typeof DOMPurify?.sanitize === 'function') {
-                        console.log("Libraries check passed inside showFinalReport."); // You already see this log
+                if (reportHtmlContent && typeof reportHtmlContent === 'string') {
 
-                        // --- <<< ADD LOGGING HERE >>> ---
-                        const rawHtml = marked.parse(reportContent);
-                        console.log("--- Raw HTML from marked.parse ---");
-                        console.log(rawHtml); // Log the direct output of marked
+                    // Check if the content LOOKS like the raw markdown fallback from the server
+                    // This indicates server-side markdown->html conversion failed.
+                    const looksLikeRawFallback = reportHtmlContent.includes("Raw Markdown content:</p><pre><code>");
 
-                        finalHtml = DOMPurify.sanitize(rawHtml, {
-                            USE_PROFILES: { html: true },
-                            ADD_ATTR: ['data-tooltip', 'aria-label', 'role', 'id', 'href'],
-                            ADD_TAGS: ['sup', 'section', 'div', 'li', 'ol', 'ul', 'a', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'code', 'pre', 'blockquote'],
+                    if (looksLikeRawFallback) {
+                        console.warn("Server indicated Markdown->HTML conversion failed. Displaying server-provided fallback HTML.");
+                        // Display the fallback HTML (which includes the escaped raw markdown) directly
+                        // We might still sanitize it lightly just in case, but avoid re-parsing as Markdown.
+                        finalHtml = DOMPurify.sanitize(reportHtmlContent, { USE_PROFILES: { html: true } });
+
+                    } else {
+                        // Assume it's intended HTML from the server (already converted)
+                        // We still sanitize it before displaying.
+                        console.log("Received report content, assuming pre-converted HTML (or valid fallback). Sanitizing...");
+                        finalHtml = DOMPurify.sanitize(reportHtmlContent, {
+                            USE_PROFILES: { html: true }, // Basic HTML profile
+                            ADD_ATTR: ['data-tooltip', 'aria-label', 'role', 'id', 'href'], // Allow attributes needed for footnotes/tooltips
+                            ADD_TAGS: ['sup', 'section', 'div', 'li', 'ol', 'ul', 'a', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'code', 'pre', 'blockquote'], // Allow common tags
                             ALLOW_DATA_ATTR: true,
                             FORCE_BODY: false
                         });
-                        console.log("--- Sanitized HTML from DOMPurify ---");
-                        console.log(finalHtml); // Log the output after sanitization
-                        // --- <<< END LOGGING >>> ---
-
-                    } else {
-                        // Fallback error logging (shouldn't be hit now)
-                        console.error("Error: Marked.js or DOMPurify library functions (parse/sanitize) not available when needed.");
-                        console.error('Current status inside showFinalReport - typeof marked:', typeof marked, 'typeof marked.parse:', typeof marked?.parse, '| typeof DOMPurify:', typeof DOMPurify, 'typeof DOMPurify.sanitize:', typeof DOMPurify?.sanitize);
-                        addProgress("Error: Markdown renderer or sanitizer functions missing. Cannot display final report correctly.", true);
-                        finalHtml = `<article><p><em>Error: Markdown renderer/sanitizer is missing. Displaying raw content:</em></p><pre><code>${escapeHtml(reportContent)}</code></pre></article>`;
+                        console.log("Sanitization complete.");
                     }
+                     // --- Client-side markdown parsing/fence stripping REMOVED ---
+
                 }
 
-                console.log("Setting innerHTML for report-display..."); // Log before setting
+                console.log("Setting innerHTML for report-display...");
                 reportDisplayDiv.innerHTML = finalHtml;
-                console.log("Finished setting innerHTML."); // Log after setting
+                console.log("Finished setting innerHTML.");
                 addCitationTooltips(); // Apply tooltips AFTER content is injected
 
             } catch (e) {
-                 console.error("Error rendering final report:", e);
+                 console.error("Error processing or displaying final report:", e);
                  addProgress(`Error displaying final report: ${e.message}`, true);
                  reportDisplayDiv.innerHTML = "<article><p><em>An error occurred while rendering the report. Please check the console.</em></p></article>";
             }
@@ -148,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function escapeHtml(unsafe) {
+    function escapeHtml(unsafe) { // Keep this helper in case it's needed elsewhere, though not for main rendering now
         if (!unsafe) return '';
         return unsafe
             .replace(/&/g, "&")
@@ -160,7 +160,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleCompletion(eventData) {
         addProgress("Research complete. Processing final results...");
-        showFinalReport(eventData.report_html); // Assumes report_html contains Markdown
+        // Pass the report_html content directly to showFinalReport
+        showFinalReport(eventData.report_html);
         addProgress("Final report displayed. Process finished.");
         if (loader) loader.classList.add('hidden');
         if (eventSource) {
@@ -274,9 +275,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Initial Setup ---
-    // Removed the initial check here as it seemed unreliable timing-wise.
-    // The check inside showFinalReport is the critical one.
-
     connectSSE(); // Start the SSE connection
 
     window.addEventListener('beforeunload', () => {
