@@ -1,3 +1,31 @@
-:80 {
+deep-research.mooo.com {
+    # Optional: Enable better logging (logs to systemd journal by default if run as service)
+    log {
+        output stderr
+        format console
+    }
+
+    # Recommended: Enable compression for faster loading
+    encode gzip zstd
+
+    # Recommended: Add useful security headers
+    header {
+        # Enable HTTP Strict Transport Security (HSTS) - Tells browsers to always use HTTPS
+        # Be sure HTTPS is working reliably before uncommenting the full HSTS line.
+        # Start with a short max-age for testing if unsure.
+        # Strict-Transport-Security "max-age=31536000;" always
+        X-Frame-Options "SAMEORIGIN" always
+        X-Content-Type-Options "nosniff" always
+        Referrer-Policy "strict-origin-when-cross-origin" always
+        # Remove Caddy's Server signature
+        -Server
+    }
+
+    # The essential part: Reverse proxy to your Gunicorn app running on port 8000
     reverse_proxy localhost:8000
 }
+
+# Optional: Redirect www to non-www (if you ever set up www.deep-research.mooo.com)
+# www.deep-research.mooo.com {
+#    redir https://deep-research.mooo.com{uri} permanent
+# }
