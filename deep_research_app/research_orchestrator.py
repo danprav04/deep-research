@@ -4,7 +4,7 @@ import json
 import os
 import traceback
 import logging
-from typing import Dict, Any, List, Callable, Optional, Tuple
+from typing import Dict, Any, List, Callable, Optional, Tuple, Generator
 from html import escape
 import concurrent.futures
 
@@ -18,42 +18,42 @@ from utils import (
 # Configure logger for this module
 logger = logging.getLogger(__name__)
 
-# Define callback function types for clarity
-SendEventCallback = Callable[[Dict[str, Any]], None]
-SendProgressCallback = Callable[[str, bool, bool], None]
+# Define yielded event structures for clarity (optional but good practice)
+ProgressEvent = Dict[str, Any] # keys: type='progress', message, is_error, is_fatal
+DataEvent = Dict[str, Any]     # keys: type='event', data={...}
+ScrapeSuccessEvent = Dict[str, Any] # keys: type='scrape_success', metadata={...}
 
 
-def run_research_process(
-    topic: str,
-    send_event_callback: SendEventCallback,
-    send_progress_callback: SendProgressCallback
-) -> List[Optional[str]]:
+def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
     """
-    Executes the entire research process from planning to report generation.
+    Executes the entire research process as a generator, yielding events.
+
+    Yields dictionaries representing different stages and data:
+    - {'type': 'progress', 'message': str, 'is_error': bool, 'is_fatal': bool}
+    - {'type': 'event', 'data': Dict[str, Any]} (e.g., for llm_chunk, stream_start)
+    - {'type': 'scrape_success', 'metadata': Dict[str, str]} (incl. temp_filepath)
 
     Args:
         topic: The research topic.
-        send_event_callback: Function to send SSE data events to the client.
-        send_progress_callback: Function to send progress/error messages to the client.
 
     Returns:
-        A list of temporary file paths created during scraping that need cleanup.
-        Returns an empty list if no files were created or if a fatal error occurred early.
+        None. The function yields events until completion or fatal error.
     """
     # --- Research state variables ---
     scraped_source_metadata_list: List[Dict[str, Any]] = []
-    temp_files_to_clean: List[Optional[str]] = []
+    # temp_files_to_clean is now managed by the caller (app.py) based on yielded events
     research_plan: List[Dict[str, Any]] = []
     accumulated_synthesis_md: str = ""
     final_report_markdown: str = ""
     url_to_index_map: Dict[str, int] = {}
     start_time_total = time.time()
+    fatal_error_occurred = False
 
     try: # <<< START OF MAIN TRY BLOCK >>>
         logger.info(f"Starting research process for topic: '{topic}'")
 
         # === Step 1: Generate Research Plan ===
-        send_progress_callback(f"Generating research plan for: '{topic}'...", False, False)
+        yield {'type': 'progress', 'message': f"Generating research plan for: '{topic}'...", 'is_error': False, 'is_fatal': False}
         plan_prompt = f"""
         Create a detailed, step-by-step research plan with 5-7 distinct steps for the topic: "{topic}"
         Each step should represent a specific question or area of inquiry relevant to a concise research report.
@@ -75,26 +75,29 @@ def run_research_process(
         """
         try:
             plan_response = call_gemini(plan_prompt)
-            research_plan = parse_research_plan(plan_response) # parse_research_plan handles basic error reporting
+            # parse_research_plan handles basic validation and returns a list or error dict
+            research_plan = parse_research_plan(plan_response)
             if not research_plan or (len(research_plan) == 1 and research_plan[0]["step"].startswith("Failed")):
                  fail_reason = research_plan[0]["step"] if research_plan else "Could not parse plan structure from LLM."
                  raw_snippet = f" Raw LLM Response Snippet: '{plan_response[:150]}...'" if plan_response else " (LLM Response was empty)"
                  logger.error(f"Failed to create/parse research plan. Reason: {fail_reason}.{raw_snippet}")
-                 send_progress_callback(f"Fatal Error: Failed to create or parse research plan. Reason: {fail_reason}.", True, True)
-                 return [] # Fatal error, return empty list
+                 yield {'type': 'progress', 'message': f"Fatal Error: Failed to create or parse research plan. Reason: {fail_reason}.", 'is_error': True, 'is_fatal': True}
+                 fatal_error_occurred = True
+                 return # Stop generation
         except Exception as e:
              logger.error(f"LLM Error generating research plan: {e}", exc_info=True)
-             send_progress_callback(f"Fatal Error: Failed during research plan generation: {e}", True, True)
-             return [] # Fatal error
+             yield {'type': 'progress', 'message': f"Fatal Error: Failed during research plan generation: {e}", 'is_error': True, 'is_fatal': True}
+             fatal_error_occurred = True
+             return # Stop generation
 
-        send_progress_callback(f"Generated {len(research_plan)} step plan.", False, False)
+        yield {'type': 'progress', 'message': f"Generated {len(research_plan)} step plan.", 'is_error': False, 'is_fatal': False}
         for i, step in enumerate(research_plan):
              step_desc = step.get('step', 'Unnamed Step')
              step_keywords = step.get('keywords', [])
-             send_progress_callback(f"  Step {i+1}: {step_desc} (Keywords: {step_keywords})", False, False)
+             yield {'type': 'progress', 'message': f"  Step {i+1}: {step_desc} (Keywords: {step_keywords})", 'is_error': False, 'is_fatal': False}
 
         # === Step 2a: Search and Collect URLs ===
-        send_progress_callback("Starting web search...", False, False)
+        yield {'type': 'progress', 'message': "Starting web search...", 'is_error': False, 'is_fatal': False}
         start_search_time = time.time()
         all_urls_from_search_step = set()
         total_search_errors = 0
@@ -104,182 +107,170 @@ def run_research_process(
             step_desc = step.get('step', f'Unnamed Step {i+1}')
             keywords = step.get('keywords', [])
             progress_msg = f"Searching - Step {i+1}/{len(research_plan)}: '{step_desc[:70]}{'...' if len(step_desc)>70 else ''}'"
-            send_progress_callback(progress_msg, False, False)
+            yield {'type': 'progress', 'message': progress_msg, 'is_error': False, 'is_fatal': False}
 
             if not keywords:
-                send_progress_callback("  -> No keywords provided for this step, skipping search.", False, False)
+                yield {'type': 'progress', 'message': "  -> No keywords provided for this step, skipping search.", 'is_error': False, 'is_fatal': False}
                 continue
 
             total_search_queries += 1
-            # perform_web_search aggregates results from providers defined within it
             step_urls, step_errors = perform_web_search(keywords)
 
             if step_errors:
                 total_search_errors += len(step_errors)
                 for err in step_errors:
-                    send_progress_callback(f"    -> Search Warning: {err}", True, False) # Report non-fatal search errors
+                    # Report non-fatal search errors
+                    yield {'type': 'progress', 'message': f"    -> Search Warning: {err}", 'is_error': True, 'is_fatal': False}
 
             new_urls_count = len(set(step_urls) - all_urls_from_search_step)
             all_urls_from_search_step.update(step_urls)
-            send_progress_callback(f"  -> Found {len(step_urls)} URLs for step keywords, {new_urls_count} new. Total unique URLs so far: {len(all_urls_from_search_step)}.", False, False)
+            yield {'type': 'progress', 'message': f"  -> Found {len(step_urls)} URLs for step keywords, {new_urls_count} new. Total unique URLs so far: {len(all_urls_from_search_step)}.", 'is_error': False, 'is_fatal': False}
 
-            # Add a small delay between keyword searches within a step if needed
             if i < len(research_plan) - 1:
                  time.sleep(config.INTER_SEARCH_DELAY_SECONDS)
 
         search_duration = time.time() - start_search_time
-        send_progress_callback(f"Search phase completed in {search_duration:.2f}s.", False, False)
-        send_progress_callback(f"Collected {len(all_urls_from_search_step)} total unique URLs ({total_search_errors} search errors).", False, False)
+        yield {'type': 'progress', 'message': f"Search phase completed in {search_duration:.2f}s.", 'is_error': False, 'is_fatal': False}
+        yield {'type': 'progress', 'message': f"Collected {len(all_urls_from_search_step)} total unique URLs ({total_search_errors} search errors).", 'is_error': False, 'is_fatal': False}
 
         # --- Filter URLs ---
         urls_to_scrape_list = []
-        send_progress_callback("Filtering URLs for scraping...", False, False)
+        yield {'type': 'progress', 'message': "Filtering URLs for scraping...", 'is_error': False, 'is_fatal': False}
         for url in sorted(list(all_urls_from_search_step)):
              if len(urls_to_scrape_list) >= config.MAX_TOTAL_URLS_TO_SCRAPE:
-                  send_progress_callback(f"  -> Reached URL scraping limit ({config.MAX_TOTAL_URLS_TO_SCRAPE}). Skipping remaining URLs.", False, False)
+                  yield {'type': 'progress', 'message': f"  -> Reached URL scraping limit ({config.MAX_TOTAL_URLS_TO_SCRAPE}). Skipping remaining URLs.", 'is_error': False, 'is_fatal': False}
                   break
 
              lower_url = url.lower()
-             # Basic checks for non-HTML/text content or unwanted schemes
              path_part = lower_url.split('?')[0].split('#')[0]
              is_file_extension = path_part.endswith(('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx', '.webp', '.svg', '.xml', '.css', '.js', '.jpeg', '.doc', '.xls', '.ppt', '.txt', '.exe', '.dmg', '.iso', '.rar', '.gz', '.tar', '.bz2', '.7z'))
              is_unwanted_scheme = lower_url.startswith(('mailto:', 'javascript:', 'ftp:', 'tel:', 'file:', 'data:'))
-             is_local = lower_url.startswith(('localhost', '127.0.0.1')) # Often points to dev environments
+             is_local = lower_url.startswith(('localhost', '127.0.0.1'))
              is_valid_http = url.startswith(('http://', 'https://'))
 
              if is_valid_http and not any([is_file_extension, is_unwanted_scheme, is_local]):
                   urls_to_scrape_list.append(url)
-             # else:
-             #     logger.debug(f"Filtered out URL: {url}")
 
-
-        send_progress_callback(f"Selected {len(urls_to_scrape_list)} URLs for scraping after filtering (limit was {config.MAX_TOTAL_URLS_TO_SCRAPE}).", False, False)
+        yield {'type': 'progress', 'message': f"Selected {len(urls_to_scrape_list)} URLs for scraping after filtering (limit was {config.MAX_TOTAL_URLS_TO_SCRAPE}).", 'is_error': False, 'is_fatal': False}
 
         if not urls_to_scrape_list:
              logger.error("No suitable URLs found to scrape after search and filtering.")
-             send_progress_callback("Fatal Error: No suitable URLs found to scrape. Cannot proceed.", True, True)
-             return [] # Fatal error
+             yield {'type': 'progress', 'message': "Fatal Error: No suitable URLs found to scrape. Cannot proceed.", 'is_error': True, 'is_fatal': True}
+             fatal_error_occurred = True
+             return # Stop generation
 
         # === Step 2b: Scrape URLs Concurrently ===
-        send_progress_callback(f"Starting concurrent scraping ({config.MAX_WORKERS} workers)...", False, False)
+        yield {'type': 'progress', 'message': f"Starting concurrent scraping ({config.MAX_WORKERS} workers)...", 'is_error': False, 'is_fatal': False}
         start_scrape_time = time.time()
         scraped_source_metadata_list = [] # Reset before scraping
-        # temp_files_to_clean is managed outside this function now
         processed_scrape_count = 0
         successful_scrape_count = 0
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
-            # Submit all scrape tasks
             future_to_url = {executor.submit(scrape_url, url): url for url in urls_to_scrape_list}
 
             for future in concurrent.futures.as_completed(future_to_url):
                 url = future_to_url[future]
                 processed_scrape_count += 1
                 try:
-                    result_dict = future.result() # result() blocks until the future completes
+                    result_dict = future.result()
                     if result_dict and 'temp_filepath' in result_dict and result_dict['temp_filepath']:
                         scraped_source_metadata_list.append(result_dict)
-                        temp_files_to_clean.append(result_dict['temp_filepath']) # Add path to list for cleanup later
                         successful_scrape_count += 1
-                        # logger.debug(f"Successfully scraped and saved temp file for: {url}")
-                    # else: result was None (scrape failed or filtered out)
-                        # logger.debug(f"Scrape returned None for: {url}")
+                        # Yield success event with metadata including the temp file path
+                        yield {'type': 'scrape_success', 'metadata': result_dict}
+                    # else: logger.debug(f"Scrape returned None for: {url}")
 
                 except Exception as exc:
-                    # Catch errors from the scrape_url function itself (e.g., network issues not caught internally)
-                    logger.error(f"Error during scraping task for {url[:70]}...: {exc}", exc_info=False) # Log traceback optionally
-                    send_progress_callback(f"    -> Scrape Error for {url[:60]}...: {escape(str(exc))}", True, False)
+                    logger.error(f"Error during scraping task for {url[:70]}...: {exc}", exc_info=False)
+                    yield {'type': 'progress', 'message': f"    -> Scrape Error for {url[:60]}...: {escape(str(exc))}", 'is_error': True, 'is_fatal': False}
 
-                # Send progress update periodically
                 if processed_scrape_count % 5 == 0 or processed_scrape_count == len(urls_to_scrape_list):
                       progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_list)
-                      send_progress_callback(f"  -> Scraping Progress: {processed_scrape_count}/{len(urls_to_scrape_list)} URLs processed ({progress_perc}%). Successful scrapes: {successful_scrape_count}", False, False)
+                      yield {'type': 'progress', 'message': f"  -> Scraping Progress: {processed_scrape_count}/{len(urls_to_scrape_list)} URLs processed ({progress_perc}%). Successful scrapes: {successful_scrape_count}", 'is_error': False, 'is_fatal': False}
 
         scrape_duration = time.time() - start_scrape_time
-        send_progress_callback(f"Scraping finished in {scrape_duration:.2f}s. Successfully scraped content from {successful_scrape_count} URLs.", False, False)
+        yield {'type': 'progress', 'message': f"Scraping finished in {scrape_duration:.2f}s. Successfully scraped content from {successful_scrape_count} URLs.", 'is_error': False, 'is_fatal': False}
 
         if not scraped_source_metadata_list:
             logger.error("Failed to scrape any content successfully.")
-            send_progress_callback("Fatal Error: Failed to scrape any content successfully. Cannot proceed with synthesis.", True, True)
-            return temp_files_to_clean # Return files created so far for cleanup
+            yield {'type': 'progress', 'message': "Fatal Error: Failed to scrape any content successfully. Cannot proceed with synthesis.", 'is_error': True, 'is_fatal': True}
+            fatal_error_occurred = True
+            return # Stop generation
 
-        # Ensure scraped list is ordered consistently (optional, but helpful for reproducibility)
         scraped_url_map = {item['url']: item for item in scraped_source_metadata_list}
         ordered_scraped_metadata_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
         scraped_source_metadata_list = ordered_scraped_metadata_list
 
-
         # === Step 3: Generate Bibliography Map ===
         url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_source_metadata_list)
-        send_progress_callback(f"Generated bibliography map for {len(url_to_index_map)} successfully scraped sources.", False, False)
+        yield {'type': 'progress', 'message': f"Generated bibliography map for {len(url_to_index_map)} successfully scraped sources.", 'is_error': False, 'is_fatal': False}
 
         # === Step 4: Synthesize Information (Streaming, RAM Optimized) ===
-        send_progress_callback(f"Synthesizing information from {len(scraped_source_metadata_list)} scraped sources using {config.GOOGLE_MODEL_NAME}...", False, False)
-        send_event_callback({'type': 'stream_start', 'target': 'synthesis'}) # Signal start of synthesis stream
+        yield {'type': 'progress', 'message': f"Synthesizing information from {len(scraped_source_metadata_list)} scraped sources using {config.GOOGLE_MODEL_NAME}...", 'is_error': False, 'is_fatal': False}
+        # Yield event to signal start of synthesis stream
+        yield {'type': 'event', 'data': {'type': 'stream_start', 'target': 'synthesis'}}
 
-        context_for_llm_parts = [] # Build context incrementally
+        context_for_llm_parts = []
         current_total_chars = 0
         sources_included_count = 0
-        estimated_total_scraped_chars = 0
 
-        send_progress_callback(f"  -> Preparing context for synthesis (limit ~{config.MAX_CONTEXT_CHARS // 1000}k chars)...", False, False)
+        yield {'type': 'progress', 'message': f"  -> Preparing context for synthesis (limit ~{config.MAX_CONTEXT_CHARS // 1000}k chars)...", 'is_error': False, 'is_fatal': False}
 
-        # --- RAM Optimized Context Building ---
         for source_metadata in scraped_source_metadata_list:
             filepath = source_metadata.get('temp_filepath')
             url = source_metadata.get('url')
             if not filepath or not url or not os.path.exists(filepath):
                  logger.warning(f"Skipping source for synthesis, missing temp file or metadata. URL: {url or 'Unknown'}, Path: {filepath}")
-                 send_progress_callback(f"  -> Warning: Skipping source, missing temp file or metadata for URL {url or 'Unknown'}", True, False)
+                 yield {'type': 'progress', 'message': f"  -> Warning: Skipping source, missing temp file or metadata for URL {url or 'Unknown'}", 'is_error': True, 'is_fatal': False}
                  continue
 
             try:
                  file_size = os.path.getsize(filepath)
-                 estimated_total_scraped_chars += file_size
-
-                 # Check if adding this file *exceeds* the limit
                  if (current_total_chars + file_size) <= config.MAX_CONTEXT_CHARS:
                      try:
                          with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                              content = f.read()
-                         if content.strip(): # Only add if content is not just whitespace
-                              # Append structured part for the prompt
+                         if content.strip():
                               context_for_llm_parts.append({'url': url, 'content': content})
-                              current_total_chars += len(content) # Use actual length read
+                              current_total_chars += len(content)
                               sources_included_count += 1
                          else:
                               logger.warning(f"Read empty or whitespace-only content from temp file {os.path.basename(filepath)} for {url[:60]}...")
-                              send_progress_callback(f"  -> Warning: Read empty content from temp file for {url[:60]}...", True, False)
+                              yield {'type': 'progress', 'message': f"  -> Warning: Read empty content from temp file for {url[:60]}...", 'is_error': True, 'is_fatal': False}
                      except Exception as read_err:
                          logger.error(f"Error reading temp file {os.path.basename(filepath)} for {url[:60]}: {read_err}", exc_info=False)
-                         send_progress_callback(f"  -> Error reading temp file for {url[:60]}...: {read_err}", True, False)
+                         yield {'type': 'progress', 'message': f"  -> Error reading temp file for {url[:60]}...: {read_err}", 'is_error': True, 'is_fatal': False}
                  else:
                       logger.warning(f"Context limit ({config.MAX_CONTEXT_CHARS // 1000}k chars) reached. Stopping context build. Included {sources_included_count} sources.")
-                      send_progress_callback(f"  -> Context limit reached. Synthesizing based on first {sources_included_count}/{len(scraped_source_metadata_list)} sources (~{current_total_chars // 1000}k chars).", True, False) # Non-fatal warning
-                      break # Stop adding more sources
+                      yield {'type': 'progress', 'message': f"  -> Context limit reached. Synthesizing based on first {sources_included_count}/{len(scraped_source_metadata_list)} sources (~{current_total_chars // 1000}k chars).", 'is_error': True, 'is_fatal': False}
+                      break
 
             except OSError as e:
                  logger.error(f"Error accessing temp file {os.path.basename(filepath)} for {url[:60]}...: {e}", exc_info=False)
-                 send_progress_callback(f"  -> Error accessing temp file metadata for {url[:60]}...: {e}", True, False)
+                 yield {'type': 'progress', 'message': f"  -> Error accessing temp file metadata for {url[:60]}...: {e}", 'is_error': True, 'is_fatal': False}
             except Exception as e:
                  logger.error(f"Unexpected error processing temp file {os.path.basename(filepath)} for {url[:60]}...: {e}", exc_info=False)
-                 send_progress_callback(f"  -> Unexpected error processing temp file for {url[:60]}...: {e}", True, False)
+                 yield {'type': 'progress', 'message': f"  -> Unexpected error processing temp file for {url[:60]}...: {e}", 'is_error': True, 'is_fatal': False}
 
         if sources_included_count == 0:
-             logger.error("No source content could be prepared for synthesis (possibly due to read errors or all files being too large).")
-             send_progress_callback("Fatal Error: No source content available for synthesis. Cannot proceed.", True, True)
-             return temp_files_to_clean # Return files for cleanup
+             logger.error("No source content could be prepared for synthesis.")
+             yield {'type': 'progress', 'message': "Fatal Error: No source content available for synthesis. Cannot proceed.", 'is_error': True, 'is_fatal': True}
+             fatal_error_occurred = True
+             return # Stop generation
 
         estimated_tokens = current_total_chars / config.CHARS_PER_TOKEN_ESTIMATE
-        send_progress_callback(f"  -> Prepared synthesis context using {sources_included_count} sources (~{current_total_chars // 1000}k chars / ~{estimated_tokens / 1000:.1f}k est. tokens).", False, False)
+        yield {'type': 'progress', 'message': f"  -> Prepared synthesis context using {sources_included_count} sources (~{current_total_chars // 1000}k chars / ~{estimated_tokens / 1000:.1f}k est. tokens).", 'is_error': False, 'is_fatal': False}
 
-        # Construct the final context string (JSON representation)
         try:
             context_json_str = json.dumps(context_for_llm_parts, indent=2, ensure_ascii=False)
+            # Clear the large list from memory once JSON string is created
+            del context_for_llm_parts
         except Exception as json_err:
             logger.error(f"Failed to serialize context parts to JSON: {json_err}", exc_info=True)
-            send_progress_callback(f"Fatal Error: Could not prepare context data for LLM: {json_err}", True, True)
-            return temp_files_to_clean
+            yield {'type': 'progress', 'message': f"Fatal Error: Could not prepare context data for LLM: {json_err}", 'is_error': True, 'is_fatal': True}
+            fatal_error_occurred = True
+            return
 
         synthesis_prompt = f"""
         Analyze the provided web content about "{topic}" based on the research plan.
@@ -290,7 +281,7 @@ def run_research_process(
         ```json
         {json.dumps(research_plan, indent=2)}
         ```
-        Source Content ({len(context_for_llm_parts)} sources):
+        Source Content ({sources_included_count} sources):
         ```json
         {context_json_str}
         ```
@@ -303,6 +294,8 @@ def run_research_process(
         6. Use `---` as a separator ONLY between the synthesis for different plan steps.
         7. Output ONLY the synthesized Markdown content structured by plan steps. Do NOT include an introduction, conclusion, summary, or bibliography in this output. Focus solely on presenting the synthesized findings per step with citations.
         """
+        # Context JSON no longer needed in memory after prompt creation
+        del context_json_str
 
         accumulated_synthesis_md = ""
         synthesis_stream_error = None
@@ -310,56 +303,52 @@ def run_research_process(
             stream_generator = stream_gemini(synthesis_prompt)
             for result in stream_generator:
                 if result['type'] == 'chunk':
-                    send_event_callback({'type': 'llm_chunk', 'content': result['content'], 'target': 'synthesis'})
+                    # Yield LLM chunk event
+                    yield {'type': 'event', 'data': {'type': 'llm_chunk', 'content': result['content'], 'target': 'synthesis'}}
                     accumulated_synthesis_md += result['content']
                 elif result['type'] == 'stream_error':
                     synthesis_stream_error = result['message']
                     logger.error(f"LLM stream error during synthesis: {synthesis_stream_error}")
-                    # Determine if fatal based on common error messages
                     is_fatal_err = any(indicator in synthesis_stream_error.lower()
                                        for indicator in ["api key", "quota", "resource has been exhausted", "permission_denied", "billing", "invalid model"])
-                    send_progress_callback(f"LLM stream error during synthesis: {synthesis_stream_error}", True, is_fatal_err)
-                    if is_fatal_err: return temp_files_to_clean # Stop process on fatal API errors
-                    break # Break on non-fatal stream error (like safety block during generation)
+                    yield {'type': 'progress', 'message': f"LLM stream error during synthesis: {synthesis_stream_error}", 'is_error': True, 'is_fatal': is_fatal_err}
+                    if is_fatal_err:
+                        fatal_error_occurred = True
+                        return # Stop generation
+                    break # Break on non-fatal stream error
                 elif result['type'] == 'stream_warning':
                      logger.warning(f"LLM Stream Warning (Synthesis): {result['message']}")
-                     send_progress_callback(f"LLM Stream Warning (Synthesis): {result['message']}", True, False) # Report as non-fatal error
+                     yield {'type': 'progress', 'message': f"LLM Stream Warning (Synthesis): {result['message']}", 'is_error': True, 'is_fatal': False}
                 elif result['type'] == 'stream_end':
                      logger.info(f"LLM synthesis stream ended. Finish Reason: {result.get('finish_reason', 'N/A')}")
                      break # Normal end
         except Exception as e:
              logger.error(f"Fatal error processing LLM synthesis stream: {e}", exc_info=True)
-             send_progress_callback(f"Fatal error processing LLM synthesis stream: {escape(str(e))}", True, True)
-             return temp_files_to_clean
+             yield {'type': 'progress', 'message': f"Fatal error processing LLM synthesis stream: {escape(str(e))}", 'is_error': True, 'is_fatal': True}
+             fatal_error_occurred = True
+             return
 
-        send_progress_callback("Synthesis generation finished.", False, False)
+        yield {'type': 'progress', 'message': "Synthesis generation finished.", 'is_error': False, 'is_fatal': False}
         if not accumulated_synthesis_md.strip() and not synthesis_stream_error:
-             # It's possible the LLM genuinely found nothing relevant
              logger.warning("Synthesis resulted in empty content, but no stream error reported.")
-             send_progress_callback("Warning: Synthesis resulted in empty content. The final report might lack detailed findings.", True, False) # Non-fatal warning
+             yield {'type': 'progress', 'message': "Warning: Synthesis resulted in empty content. Final report may lack detail.", 'is_error': True, 'is_fatal': False}
         elif not accumulated_synthesis_md.strip() and synthesis_stream_error:
              logger.error(f"Synthesis resulted in empty content due to stream error: {synthesis_stream_error}")
-             # Progress message already sent by stream_error handling
 
         # === Step 5: Generate Final Report (Streaming) ===
-        send_progress_callback(f"Generating final report using {config.GOOGLE_MODEL_NAME}...", False, False)
-        send_event_callback({'type': 'stream_start', 'target': 'report'}) # Signal start of report stream
+        yield {'type': 'progress', 'message': f"Generating final report using {config.GOOGLE_MODEL_NAME}...", 'is_error': False, 'is_fatal': False}
+        yield {'type': 'event', 'data': {'type': 'stream_start', 'target': 'report'}}
 
-        # Estimate size of static parts of the prompt to see how much space is left for synthesis
-        # These are rough estimates, actual token counts vary.
         base_prompt_elements_len = (
-            len(topic) +
-            len(json.dumps(research_plan)) +
-            len(bibliography_prompt_list) +
-            2000 # Estimate for fixed instructions text
+            len(topic) + len(json.dumps(research_plan)) + len(bibliography_prompt_list) + 2000
         )
         available_chars_for_synthesis_in_report = config.MAX_CONTEXT_CHARS - base_prompt_elements_len
 
         if len(accumulated_synthesis_md) > available_chars_for_synthesis_in_report:
-            chars_to_keep = available_chars_for_synthesis_in_report - 100 # Keep buffer for truncation message
+            chars_to_keep = available_chars_for_synthesis_in_report - 100
             truncated_synthesis_md = accumulated_synthesis_md[:chars_to_keep] + "\n\n... [Synthesis truncated due to context limits for report generation]"
             logger.warning(f"Truncating synthesis markdown (from {len(accumulated_synthesis_md)} to {len(truncated_synthesis_md)} chars) for report prompt.")
-            send_progress_callback(f"  -> Warning: Synthesis text truncated for final report generation due to context limits.", True, False)
+            yield {'type': 'progress', 'message': "  -> Warning: Synthesis text truncated for final report generation due to context limits.", 'is_error': True, 'is_fatal': False}
         else:
             truncated_synthesis_md = accumulated_synthesis_md
 
@@ -407,86 +396,88 @@ def run_research_process(
 
         Generate the Markdown report now for topic: "{topic}".
         """
+        # Synthesis markdown no longer needed after creating prompt
+        del accumulated_synthesis_md
+        del truncated_synthesis_md
+
         final_report_markdown = ""
         report_stream_error = None
         try:
             stream_generator = stream_gemini(report_prompt)
             for result in stream_generator:
                 if result['type'] == 'chunk':
-                    send_event_callback({'type': 'llm_chunk', 'content': result['content'], 'target': 'report'})
-                    final_report_markdown += result['content'] # Accumulate raw markdown
+                    yield {'type': 'event', 'data': {'type': 'llm_chunk', 'content': result['content'], 'target': 'report'}}
+                    final_report_markdown += result['content']
                 elif result['type'] == 'stream_error':
                     report_stream_error = result['message']
                     logger.error(f"LLM stream error during report generation: {report_stream_error}")
                     is_fatal_err = any(indicator in report_stream_error.lower()
                                        for indicator in ["api key", "quota", "resource has been exhausted", "permission_denied", "billing", "invalid model"])
-                    send_progress_callback(f"LLM stream error during report generation: {report_stream_error}", True, is_fatal_err)
-                    if is_fatal_err: return temp_files_to_clean
+                    yield {'type': 'progress', 'message': f"LLM stream error during report generation: {report_stream_error}", 'is_error': True, 'is_fatal': is_fatal_err}
+                    if is_fatal_err:
+                        fatal_error_occurred = True
+                        return # Stop generation
                     break # Break on non-fatal stream error
                 elif result['type'] == 'stream_warning':
                      logger.warning(f"LLM Stream Warning (Report): {result['message']}")
-                     send_progress_callback(f"LLM Stream Warning (Report): {result['message']}", True, False)
+                     yield {'type': 'progress', 'message': f"LLM Stream Warning (Report): {result['message']}", 'is_error': True, 'is_fatal': False}
                 elif result['type'] == 'stream_end':
                      logger.info(f"LLM report stream ended. Finish Reason: {result.get('finish_reason', 'N/A')}")
                      break # Normal end
         except Exception as e:
              logger.error(f"Fatal error processing LLM report stream: {e}", exc_info=True)
-             send_progress_callback(f"Fatal error processing LLM report stream: {escape(str(e))}", True, True)
-             return temp_files_to_clean
+             yield {'type': 'progress', 'message': f"Fatal error processing LLM report stream: {escape(str(e))}", 'is_error': True, 'is_fatal': True}
+             fatal_error_occurred = True
+             return
 
-        send_progress_callback("Report generation finished.", False, False)
+        yield {'type': 'progress', 'message': "Report generation finished.", 'is_error': False, 'is_fatal': False}
         if not final_report_markdown.strip() and not report_stream_error:
              logger.error("Final report generation resulted in empty content, but no stream error reported.")
-             send_progress_callback("Error: Final report generation resulted in empty content.", True, False) # Non-fatal, show error but don't stop
-             final_report_markdown = f"# Research Report: {topic}\n\n*Report generation failed or produced no content. Synthesis might have been empty or an error occurred during report formatting.*"
+             yield {'type': 'progress', 'message': "Error: Final report generation resulted in empty content.", 'is_error': True, 'is_fatal': False}
+             final_report_markdown = f"# Research Report: {topic}\n\n*Report generation failed or produced no content.*"
         elif not final_report_markdown.strip() and report_stream_error:
              logger.error(f"Final report generation resulted in empty content due to stream error: {report_stream_error}")
-             # Error message already sent
 
         # === Step 6: Final Processing and Completion ===
-        send_progress_callback("Processing final report for display...", False, False)
-
-        # Convert final Markdown to HTML for display
-        # The utility function now includes logging for conversion errors
+        yield {'type': 'progress', 'message': "Processing final report for display...", 'is_error': False, 'is_fatal': False}
         report_html = convert_markdown_to_html(final_report_markdown)
 
-        # Check if conversion indicated an error or was empty
         if report_html.strip().lower().startswith(('<pre><strong>error', '<p><em>markdown conversion resulted', '<p><em>report content is empty')):
             logger.error("Failed to convert final Markdown report to HTML for display.")
-            send_progress_callback("Error: Failed to convert final Markdown report to HTML. Displaying raw Markdown instead.", True, False)
-            # Fallback: wrap raw markdown in pre/code tags for basic display
+            yield {'type': 'progress', 'message': "Error converting final report Markdown to HTML. Displaying raw Markdown.", 'is_error': True, 'is_fatal': False}
             report_html = f"<h2>Report Display Error</h2><p>Could not convert report Markdown to HTML. Raw Markdown content:</p><pre><code>{escape(final_report_markdown)}</code></pre>"
         elif not report_html.strip():
              logger.error("Markdown conversion resulted in empty HTML without specific error message.")
-             send_progress_callback("Error: Markdown conversion resulted in empty HTML. Displaying raw Markdown instead.", True, False)
+             yield {'type': 'progress', 'message': "Error: Markdown conversion resulted in empty HTML.", 'is_error': True, 'is_fatal': False}
              report_html = f"<h2>Report Display Error</h2><p>Markdown conversion resulted in empty content. Raw Markdown content:</p><pre><code>{escape(final_report_markdown)}</code></pre>"
 
-
-        # Send final data package to the client
-        send_progress_callback("Sending final results to client...", False, False)
+        # Yield final data package to the client
+        yield {'type': 'progress', 'message': "Sending final results to client...", 'is_error': False, 'is_fatal': False}
         final_data = {
             'type': 'complete',
             'report_html': report_html
         }
-        send_event_callback(final_data)
+        yield {'type': 'event', 'data': final_data}
 
         end_time_total = time.time()
         total_duration = end_time_total - start_time_total
         logger.info(f"Research process for '{topic}' completed successfully in {total_duration:.2f} seconds.")
-        send_progress_callback(f"Research process completed successfully in {total_duration:.2f} seconds.", False, False)
-
-        return temp_files_to_clean # Return list of files for cleanup
+        yield {'type': 'progress', 'message': f"Research process completed successfully in {total_duration:.2f} seconds.", 'is_error': False, 'is_fatal': False}
 
     except Exception as e:
-        # Catch any unexpected errors in the main orchestration workflow
+        # Catch any *other* unexpected errors in the main orchestration workflow
         logger.error(f"FATAL: Unhandled exception in research orchestrator for topic '{topic}': {e}", exc_info=True)
-        # traceback.print_exc() # Log full traceback to server logs
         error_msg = f"Unexpected server error during research orchestration: {type(e).__name__} - {escape(str(e))}"
-        # Try to send final fatal error message
-        try:
-             send_progress_callback(error_msg, True, True)
-        except Exception as callback_err:
-             logger.error(f"Failed to send final fatal error message to client: {callback_err}")
-
-        # Return any temp files created *before* the fatal error occurred
-        return temp_files_to_clean
+        # Yield final fatal error message if possible
+        if not fatal_error_occurred: # Avoid sending duplicate fatal errors
+            try:
+                 yield {'type': 'progress', 'message': error_msg, 'is_error': True, 'is_fatal': True}
+            except Exception as callback_err:
+                 logger.error(f"Failed to yield final fatal error message: {callback_err}")
+    finally:
+        # Log completion or failure
+        if not fatal_error_occurred:
+            logger.info("Orchestrator generator finished.")
+        else:
+            logger.error("Orchestrator generator stopped due to fatal error.")
+        # Cleanup is handled by the caller (app.py)
