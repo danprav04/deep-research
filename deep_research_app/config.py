@@ -10,9 +10,9 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME")
 
 # --- Search Configuration ---
-MAX_SEARCH_RESULTS_PER_ENGINE_STEP = 5
-MAX_TOTAL_URLS_TO_SCRAPE = 50
-MAX_WORKERS = 10
+MAX_SEARCH_RESULTS_PER_ENGINE_STEP = 10
+MAX_TOTAL_URLS_TO_SCRAPE = 100
+MAX_WORKERS = 2
 REQUEST_TIMEOUT = 12
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36"
 PICO_CSS_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"
