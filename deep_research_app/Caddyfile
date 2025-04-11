@@ -47,12 +47,10 @@ macros-counter.mooo.com {
     reverse_proxy localhost:4000
 }
 
- Optional: Redirect www to non-www for deep-research
  www.deep-research.mooo.com {
     redir https://deep-research.mooo.com{uri} permanent
  }
 
- Optional: Redirect www to non-www for macros-counter
  www.macros-counter.mooo.com {
     redir https://macros-counter.mooo.com{uri} permanent
  }
