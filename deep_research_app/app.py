@@ -121,7 +121,6 @@ def stream():
         try: # <<< START OF MAIN TRY BLOCK >>>
             # === Step 1: Generate Research Plan ===
             yield from send_progress(f"Generating research plan for: '{topic}'...")
-            # ... (plan generation logic remains the same) ...
             plan_prompt = f"""
             Create a detailed, step-by-step research plan with 5-10 distinct steps for the topic: "{topic}"
             Each step should represent a specific question or area of inquiry.
@@ -144,7 +143,6 @@ def stream():
                  yield from send_progress(f"LLM Error: Failed to generate research plan. Details: {e}", is_error=True, is_fatal=True)
                  return
 
-            # Check if parsing failed or returned the failure indicator
             if not research_plan or (len(research_plan) == 1 and research_plan[0]["step"].startswith("Failed")):
                  fail_reason = research_plan[0]["step"] if research_plan else "Could not parse plan structure."
                  raw_snippet = f" Raw LLM Response Snippet: '{plan_response[:150]}...'" if plan_response else " (LLM Response was empty)"
@@ -162,7 +160,6 @@ def stream():
             all_urls_from_search_step = set()
             total_search_errors = 0
             total_search_queries = 0
-            # ... (search logic remains the same) ...
             for i, step in enumerate(research_plan):
                 step_desc = step.get('step', f'Unnamed Step {i+1}')
                 keywords = step.get('keywords', [])
@@ -191,7 +188,7 @@ def stream():
             yield from send_progress(f"Collected {len(all_urls_from_search_step)} total unique URLs across all steps ({total_search_errors} search engine errors encountered).")
 
 
-            # --- Filter URLs (remains the same) ---
+            # --- Filter URLs ---
             urls_to_scrape_list = []
             yield from send_progress("Filtering URLs for scraping...")
             for url in sorted(list(all_urls_from_search_step)):
@@ -210,8 +207,6 @@ def stream():
 
                  if is_valid_http and not any([is_file, is_mailto, is_javascript, is_ftp, is_tel, is_local]):
                       urls_to_scrape_list.append(url)
-                 # else: # Optional verbose logging
-                 #     yield from send_progress(f"  -> Filtering out: {url[:80]}...")
 
             yield from send_progress(f"Selected {len(urls_to_scrape_list)} URLs for scraping after filtering (limit was {config.MAX_TOTAL_URLS_TO_SCRAPE}).")
 
@@ -220,7 +215,7 @@ def stream():
                  return
 
 
-            # === Step 2b: Scrape URLs Concurrently (Modified) ===
+            # === Step 2b: Scrape URLs Concurrently ===
             yield from send_progress(f"Starting concurrent scraping ({config.MAX_WORKERS} workers)...")
             start_scrape_time = time.time()
             scraped_source_metadata_list = [] # Reset list for this request
@@ -234,18 +229,16 @@ def stream():
                     url = future_to_url[future]
                     processed_scrape_count += 1
                     try:
-                        # result_dict is now {'url': url, 'temp_filepath': path} or None
+                        # result_dict is {'url': url, 'temp_filepath': path} or None
                         result_dict = future.result()
                         if result_dict and 'temp_filepath' in result_dict:
                             scraped_source_metadata_list.append(result_dict)
                             temp_files_to_clean.append(result_dict['temp_filepath']) # Add path for cleanup
                             successful_scrape_count += 1
-                            # yield from send_progress(f"    -> Success: Scraped {url[:60]}... to temp file") # Noisy
                         # else: result was None (filtered or scrape error)
                     except Exception as exc:
-                        yield from send_progress(f"    -> Scrape Error for {url[:60]}...: {escape(str(exc))}", is_error=True) # Log specific future error
+                        yield from send_progress(f"    -> Scrape Error for {url[:60]}...: {escape(str(exc))}", is_error=True)
 
-                    # Send progress update periodically
                     if processed_scrape_count % 5 == 0 or processed_scrape_count == len(urls_to_scrape_list):
                           progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_list)
                           yield from send_progress(f"  -> Scraping Progress: {processed_scrape_count}/{len(urls_to_scrape_list)} URLs processed ({progress_perc}%). Successful scrapes: {successful_scrape_count}")
@@ -258,24 +251,20 @@ def stream():
                 return
 
             # Ensure order matches original scrape list if needed (useful for consistent bibliography)
-            # Map url to the metadata dict {'url': ..., 'temp_filepath': ...}
             scraped_url_map = {item['url']: item for item in scraped_source_metadata_list}
-            # Reorder based on the original filtered list
             ordered_scraped_metadata_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
             scraped_source_metadata_list = ordered_scraped_metadata_list
 
 
             # === Step 3: Generate Bibliography Map ===
-            # generate_bibliography_map only needs the 'url' field from the metadata
             url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_source_metadata_list)
             yield from send_progress(f"Generated bibliography map for {len(url_to_index_map)} successfully scraped sources.")
 
 
-            # === Step 4: Synthesize Information (Streaming) (Modified Context Building) ===
+            # === Step 4: Synthesize Information (Streaming) ===
             yield from send_progress(f"Synthesizing information from scraped content using {config.GOOGLE_MODEL_NAME}...")
-            yield from send_event({'type': 'stream_start', 'target': 'synthesis'}) # Signal UI
+            yield from send_event({'type': 'stream_start', 'target': 'synthesis'})
 
-            # Prepare context by reading from temp files, respecting limits
             context_for_llm_structured = []
             current_chars = 0
             sources_included_count = 0
@@ -291,27 +280,23 @@ def stream():
                      continue
 
                 try:
-                     # Estimate size using file size (bytes ~= chars for UTF-8 text)
                      file_size = os.path.getsize(filepath)
                      estimated_total_chars += file_size
 
-                     # Check if adding this source would exceed the limit
                      if current_chars + file_size <= config.MAX_CONTEXT_CHARS:
-                         # Read content from the temp file
                          with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                              content = f.read()
 
-                         if content: # Ensure content was read successfully
+                         if content:
                               context_for_llm_structured.append({'url': url, 'content': content})
-                              current_chars += file_size # Use file_size for consistency
+                              current_chars += file_size
                               sources_included_count += 1
                          else:
                               yield from send_progress(f"  -> Warning: Read empty content from temp file {os.path.basename(filepath)} for {url[:60]}...", is_error=True)
 
                      else:
-                          # Stop adding sources if limit is reached
                           yield from send_progress(f"  -> Context limit ({config.MAX_CONTEXT_CHARS // 1000}k chars) likely reached. Preparing synthesis using first {sources_included_count}/{len(scraped_source_metadata_list)} sources.", is_error=True)
-                          break # Stop iterating through sources
+                          break
 
                 except OSError as e:
                      yield from send_progress(f"  -> Error accessing temp file {os.path.basename(filepath)} for {url[:60]}...: {e}", is_error=True)
@@ -322,7 +307,6 @@ def stream():
             estimated_tokens = current_chars / config.CHARS_PER_TOKEN_ESTIMATE
             yield from send_progress(f"  -> Synthesizing based on {sources_included_count} sources (~{current_chars // 1000}k chars / ~{estimated_tokens / 1000:.1f}k estimated tokens).")
 
-            # --- Synthesis Prompt Generation (remains the same) ---
             synthesis_prompt = f"""
             Analyze the provided web content about "{topic}" based on the research plan.
             Synthesize key information relevant to each plan step, citing sources accurately using ONLY the provided URLs.
@@ -346,7 +330,6 @@ def stream():
             7. Output ONLY the synthesized Markdown content structured by plan steps. Do NOT include an introduction, conclusion, summary, or bibliography in this output.
             """
 
-            # --- LLM Streaming Call for Synthesis (remains the same) ---
             accumulated_synthesis_md = "" # Store raw markdown from synthesis stream
             synthesis_stream_error = None
             try:
@@ -376,7 +359,6 @@ def stream():
 
 
             # === Step 5: Generate Final Report (Streaming) ===
-            # ... (Report prompt generation logic is the same, using accumulated_synthesis_md) ...
             yield from send_progress(f"Generating final report using {config.GOOGLE_MODEL_NAME}...")
             yield from send_event({'type': 'stream_start', 'target': 'report'})
 
@@ -433,7 +415,6 @@ def stream():
 
             Generate the Markdown report now for topic: "{topic}".
             """
-            # --- LLM Streaming Call for Report (remains the same) ---
             final_report_markdown = "" # Store the final markdown report stream
             report_stream_error = None
             try:
@@ -463,82 +444,27 @@ def stream():
                  final_report_markdown = f"# Research Report: {topic}\n\n*Report generation failed or produced no content. Check logs for details.*"
 
 
-            # === Step 6: Final Processing and Completion (Modified Raw Data Preview) ===
+            # === Step 6: Final Processing and Completion ===
             yield from send_progress("Processing final report for display and download...")
 
-            # Convert final Markdown to HTML (remains the same)
+            # Convert final Markdown to HTML
             report_html = convert_markdown_to_html(final_report_markdown)
             if report_html.startswith("<pre>Error during Markdown conversion"):
                 yield from send_progress("Error: Failed to convert final Markdown report to HTML for display.", is_error=True)
                 report_html = f"<h2>Report Display Error</h2><p>Could not convert report Markdown to HTML. Displaying raw Markdown:</p><pre><code>{escape(final_report_markdown)}</code></pre>"
 
 
-            # Prepare raw data preview by reading snippets from temp files
-            preview_limit_chars = 3000 # Total chars for the entire preview
-            raw_data_preview_list = []
-            current_preview_len = 0
-            preview_read_size = 500 # Max chars to read from each file for the preview
-            yield from send_progress("Preparing raw scraped data preview (reading from temp files)...")
-
-            for i, src_metadata in enumerate(scraped_source_metadata_list):
-                url = src_metadata.get('url', 'N/A')
-                filepath = src_metadata.get('temp_filepath')
-                preview_content = f"Error reading preview from {os.path.basename(filepath or 'N/A')}"
-                content_len_for_json = 0
-
-                if filepath and os.path.exists(filepath):
-                    try:
-                        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                            preview_content = f.read(preview_read_size)
-                            if len(preview_content) == preview_read_size:
-                                 preview_content += "..." # Indicate truncation
-                        content_len_for_json = len(preview_content)
-                    except Exception as read_err:
-                        preview_content = f"Error reading preview: {escape(str(read_err))}"
-                        content_len_for_json = len(preview_content)
-                else:
-                    preview_content = "Source file not found or path missing."
-                    content_len_for_json = len(preview_content)
-
-                # Estimate size of JSON entry BEFORE creating it
-                # Rough estimate: len(url) + len(content) + json overhead (~20 chars)
-                entry_estimated_size = len(url) + content_len_for_json + 20
-
-                if current_preview_len + entry_estimated_size < preview_limit_chars:
-                    # Use compact JSON for preview, handle potential errors during dump
-                    try:
-                        src_preview_dict = {"url": url, "content_preview": preview_content}
-                        src_dump = json.dumps(src_preview_dict, separators=(',', ':'), ensure_ascii=False)
-                    except Exception as json_err:
-                        src_dump = f'{{"error": "Could not serialize preview source", "url": "{escape(url)}", "details": "{escape(str(json_err))}"}}'
-
-                    raw_data_preview_list.append(src_dump)
-                    current_preview_len += len(src_dump) # Use actual dumped length
-                else:
-                    yield from send_progress(f"  -> Raw data preview limit ({preview_limit_chars} chars) reached. Stopped adding previews at source {i+1}.", is_error=True)
-                    break # Stop adding if preview limit exceeded
-
-            # Format the preview nicely
-            if raw_data_preview_list:
-                 raw_data_preview = "[\n  " + ",\n  ".join(raw_data_preview_list) + "\n]"
-            else:
-                 raw_data_preview = "[]"
-
-            if len(scraped_source_metadata_list) > len(raw_data_preview_list):
-                 raw_data_preview += f"\n\n... ({len(raw_data_preview_list)} out of {len(scraped_source_metadata_list)} source previews shown due to size limit of {preview_limit_chars} chars)"
-            elif not scraped_source_metadata_list:
-                 raw_data_preview = "[] (No sources were successfully scraped or retained)"
-            else: # All previews fit
-                raw_data_preview += f"\n\n({len(raw_data_preview_list)} source previews shown)"
+            # --- REMOVED: Raw data preview generation ---
+            # (The code block generating raw_data_preview_list and raw_data_preview was here)
 
 
-            # Send final data package to the client (remains the same)
+            # Send final data package to the client
             yield from send_progress("Sending final results to client...")
             final_data = {
                 'type': 'complete',
                 'report_html': report_html,
                 'report_markdown': final_report_markdown,
-                'raw_scraped_data_preview': raw_data_preview,
+                # 'raw_scraped_data_preview': raw_data_preview, # REMOVED THIS LINE
                 'docx_available': DOCX_CONVERSION_AVAILABLE
             }
             yield from send_event(final_data)
@@ -551,10 +477,8 @@ def stream():
             print(f"FATAL: An unexpected error occurred during stream generation:")
             traceback.print_exc() # Print full traceback to server logs
             error_msg = f"Unexpected server error during research: {type(e).__name__} - {escape(str(e))}"
-            # Use the send_progress helper for errors
             yield from send_progress(error_msg, is_error=True, is_fatal=True)
         finally:
-            # <<< START OF FINALLY BLOCK >>>
             # --- Clean up temporary files ---
             if temp_files_to_clean:
                  print(f"INFO: Cleaning up {len(temp_files_to_clean)} temporary scrape files...")
@@ -562,10 +486,9 @@ def stream():
                  failed_count = 0
                  for fpath in temp_files_to_clean:
                      try:
-                         if os.path.exists(fpath): # Check if file exists before removing
+                         if os.path.exists(fpath):
                               os.remove(fpath)
                               cleaned_count += 1
-                              # print(f"  Removed: {os.path.basename(fpath)}") # Verbose logging
                          # else: Already removed or never created properly
                      except OSError as e:
                          print(f"  Warning: Failed to remove temp file {os.path.basename(fpath)}: {e}")
@@ -574,10 +497,9 @@ def stream():
 
             # Signal that the stream is definitively finished
             yield from send_event({'type': 'stream_terminated'})
-            # <<< END OF FINALLY BLOCK >>>
 
 
-    # Set headers for Server-Sent Events (remains the same)
+    # Set headers for Server-Sent Events
     headers = {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -587,7 +509,6 @@ def stream():
     return Response(stream_with_context(generate_updates()), headers=headers)
 
 
-# --- download_docx route remains the same ---
 @app.route('/download_docx', methods=['POST'])
 def download_docx():
     """Converts the received Markdown report to DOCX and sends it as a download."""
@@ -647,7 +568,7 @@ def download_docx():
         return jsonify({"success": False, "message": msg}), 500
 
 
-# --- Run the App --- (remains the same)
+# --- Run the App ---
 if __name__ == '__main__':
     if not config.GOOGLE_API_KEY:
         print("FATAL ERROR: GOOGLE_API_KEY not found. Please set it in your .env file or environment variables.")
@@ -656,12 +577,7 @@ if __name__ == '__main__':
         print("FATAL ERROR: GOOGLE_MODEL_NAME not found. Please set it in your .env file or environment variables.")
         sys.exit(1)
 
-    # Create a temporary directory for scrape files if it doesn't exist
-    # Although NamedTemporaryFile handles location, this can be useful for inspection/cleanup
-    # temp_dir = tempfile.gettempdir()
-    # scrape_temp_subdir = os.path.join(temp_dir, "deep_research_scrapes")
-    # os.makedirs(scrape_temp_subdir, exist_ok=True)
-    # print(f"INFO: Using temporary directory for scrapes: {temp_dir}") # tempfile handles this directly
-
     print(f"INFO: Starting Flask server...")
+    # Use threaded=True for handling concurrent requests (like SSE + downloads) efficiently in development
+    # For production, prefer a proper WSGI server like Gunicorn or uWSGI behind a reverse proxy (like Nginx or Caddy)
     app.run(debug=False, host='0.0.0.0', port=5001, threaded=True)

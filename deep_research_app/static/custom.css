@@ -1,121 +1,289 @@
-/* custom.css - Additional styling for the research report */
+/* custom.css - Styling for the research report */
 
-/* Target the container where the report HTML is injected */
-#report-display {
-    margin-top: 1.5rem;
+/* --- General Layout & Spacing --- */
+body {
+    padding-bottom: 5rem; /* Ensure space below content */
+}
+
+/* Target the container holding the final report and actions */
+#final-report-display {
+    margin-top: 2rem;
     padding: 1.5rem;
-    border: 1px solid var(--pico-card-border-color); /* Use Pico variable */
+    border: 1px solid var(--pico-card-border-color);
     border-radius: var(--pico-border-radius);
-    background-color: var(--pico-card-background-color); /* Use Pico variable */
+    background-color: var(--pico-card-background-color);
     box-shadow: var(--pico-card-box-shadow);
 }
 
-/* Spacing for headings */
+/* --- Report Content Styling (#report-display) --- */
+#report-display {
+    /* The report content itself */
+    margin-bottom: 2rem; /* Add space between report and download buttons */
+}
+
+/* Spacing for headings inside the report */
 #report-display h1 {
-    margin-top: 0; /* First heading might not need top margin */
+    margin-top: 0;
     margin-bottom: 1.5rem;
-    color: var(--pico-h1-color); /* Ensure consistency */
+    color: var(--pico-h1-color);
+    border-bottom: 2px solid var(--pico-primary-border); /* Emphasize main title */
+    padding-bottom: 0.5rem;
 }
 
 #report-display h2 {
-    margin-top: 2rem;
-    margin-bottom: 1rem;
+    margin-top: 2.2rem;
+    margin-bottom: 1.2rem;
     border-bottom: 1px solid var(--pico-muted-border-color);
-    padding-bottom: 0.3rem;
+    padding-bottom: 0.4rem;
     color: var(--pico-h2-color);
 }
 
 #report-display h3 {
-    margin-top: 1.75rem;
-    margin-bottom: 0.75rem;
+    margin-top: 1.8rem;
+    margin-bottom: 0.8rem;
     color: var(--pico-h3-color);
 }
 
 /* Paragraph styling */
 #report-display p {
-    line-height: 1.65; /* Improve readability */
-    margin-bottom: 1.1rem;
+    line-height: 1.7; /* Slightly increased line height */
+    margin-bottom: 1.2rem; /* More space after paragraphs */
 }
 
-/* List styling (adjust if needed) */
+/* List styling */
 #report-display ul,
 #report-display ol {
-    margin-left: 1.5rem;
-    margin-bottom: 1.1rem;
+    margin-left: 1.8rem; /* Indent lists slightly more */
+    margin-bottom: 1.2rem;
 }
 
 #report-display li {
-    margin-bottom: 0.4rem;
+    margin-bottom: 0.5rem;
 }
 
+/* Blockquote styling */
+#report-display blockquote {
+    margin-left: 1rem;
+    margin-right: 1rem;
+    padding: 0.8rem 1.2rem;
+    border-left: 4px solid var(--pico-primary);
+    background-color: var(--pico-code-background-color); /* Subtle background */
+    color: var(--pico-color);
+}
+#report-display blockquote p {
+    margin-bottom: 0.5rem; /* Reduce space within blockquotes */
+}
+
+/* Code block styling */
+#report-display pre {
+    margin-bottom: 1.2rem;
+    padding: 1rem;
+}
+
+/* Table styling */
+#report-display table {
+    margin-bottom: 1.5rem;
+}
 
 /* --- Citation Styling & Interactivity --- */
-
-/* Style the superscript citation link */
 #report-display sup a[href^="#fn:"] {
-    display: inline-block; /* Allows padding and background */
+    display: inline-block;
     padding: 0.1em 0.4em;
     margin: 0 0.1em;
-    background-color: var(--pico-mark-background-color); /* Use mark background color */
-    color: var(--pico-mark-color); /* Use mark text color */
+    background-color: var(--pico-mark-background-color);
+    color: var(--pico-mark-color);
     border-radius: 3px;
     text-decoration: none;
-    font-size: 0.8em; /* Slightly smaller than default sup */
+    font-size: 0.75em; /* Make slightly smaller */
     font-weight: bold;
-    line-height: 1; /* Prevent affecting paragraph line height */
-    vertical-align: super; /* Keep it superscripted */
-    transition: background-color 0.2s ease;
-    cursor: help; /* Indicate interactivity */
+    line-height: 1;
+    vertical-align: super;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    cursor: pointer; /* Use pointer for clearer click indication */
 }
 
-/* Hover effect for citation link */
-#report-display sup a[href^="#fn:"]:hover {
-    background-color: var(--pico-ins-background-color);
-    color: var(--pico-ins-color);
+#report-display sup a[href^="#fn:"]:hover,
+#report-display sup a[href^="#fn:"]:focus { /* Add focus style for accessibility */
+    background-color: var(--pico-primary-focus);
+    color: var(--pico-primary-inverse);
+    outline: none; /* Pico handles focus rings, or add custom if needed */
 }
 
 /* --- Bibliography Styling --- */
-
-/* Style the entire footnote section */
 #report-display .footnotes {
-    margin-top: 2.5rem;
-    padding-top: 1rem;
+    margin-top: 3rem;
+    padding-top: 1.5rem;
     border-top: 2px solid var(--pico-primary-border);
-    font-size: 0.9em; /* Make bibliography slightly smaller */
+    font-size: 0.9em;
     color: var(--pico-muted-color);
 }
 
-/* Individual bibliography items */
+#report-display .footnotes hr {
+    display: none; /* Hide the default hr if markdown-it adds one */
+}
+
 #report-display .footnotes ol {
-    padding-left: 0; /* Remove default padding if needed */
-    list-style: none; /* Remove default numbering if using target-counter */
+    padding-left: 0;
+    list-style: none;
 }
 
 #report-display .footnotes li {
-    margin-bottom: 0.6rem;
-    /* Use target-counter to display the number based on the ID */
-    counter-increment: footnote-counter;
+    margin-bottom: 0.8rem; /* Slightly more space between entries */
     position: relative;
-    padding-left: 2.5em; /* Space for the counter */
+    padding-left: 3em; /* Increase space for counter */
+    line-height: 1.5; /* Improve readability of multi-line entries */
 }
 
-/* Style the generated number using ::before */
+/* Style the citation number in the bibliography */
 #report-display .footnotes li::before {
-     /* Extract the number from the ID using target-counter */
-    content: "[" target-counter(attr(id, string) s) "]"; /* Note: Simplified selector for browser compatibility */
-    /* A more specific version (might not work everywhere): content: "[" target-counter(attr(id, string) s) "]"; */
+    /* Use target-counter for the number. Needs ID on the <li>, generated by markdown-it footnote plugin */
+    content: "[" target-counter(attr(id, string), decimal) "]"; /* Use decimal counter */
     position: absolute;
     left: 0;
+    top: 0; /* Align with the top of the line */
+    width: 2.5em; /* Ensure consistent width */
+    text-align: right; /* Align numbers nicely */
+    padding-right: 0.5em; /* Space after number */
     font-weight: bold;
-    color: var(--pico-primary); /* Use primary color for emphasis */
+    color: var(--pico-primary);
 }
 
 /* Style the back-reference link (arrow) */
 #report-display .footnotes li a[href^="#fnref:"] {
-    margin-left: 0.5em;
+    margin-left: 0.6em;
     text-decoration: none;
     color: var(--pico-secondary);
+    font-size: 0.9em; /* Make back arrow slightly smaller */
 }
-#report-display .footnotes li a[href^="#fnref:"]:hover {
+#report-display .footnotes li a[href^="#fnref:"]:hover,
+#report-display .footnotes li a[href^="#fnref:"]:focus {
     text-decoration: underline;
+    outline: none;
+}
+
+/* --- Download Actions Styling --- */
+#report-actions {
+    /* Container for download buttons below the report */
+    padding-top: 1rem;
+    border-top: 1px dashed var(--pico-muted-border-color);
+    display: flex; /* Use flexbox for alignment */
+    align-items: center; /* Vertically align items */
+    flex-wrap: wrap; /* Allow items to wrap on small screens */
+    gap: 1rem; /* Space between items */
+}
+
+#report-actions h3 {
+    margin: 0; /* Remove default heading margin */
+    font-size: 1.1rem; /* Slightly smaller heading */
+    color: var(--pico-h6-color); /* Use a less prominent heading color */
+    flex-basis: 100%; /* Make heading take full width initially */
+    margin-bottom: 0.5rem; /* Space below heading */
+}
+
+#report-actions form {
+    display: inline-block; /* Keep forms inline */
+    margin: 0; /* Remove default form margin */
+}
+
+#report-actions button {
+    margin: 0; /* Remove default button margin if any */
+}
+
+#report-actions #docx-disabled-msg {
+    font-size: 0.85em;
+    color: var(--pico-muted-color);
+    margin-left: 0.5rem;
+}
+
+/* --- Live Streaming Area Styling (Before Completion) --- */
+#report-container {
+    margin-top: 1.5rem;
+}
+#synthesis-output, #report-output {
+    min-height: 80px; /* Slightly reduced placeholder height */
+    padding: 1rem;
+    border: 1px dashed var(--pico-muted-border-color);
+    margin-bottom: 1.5rem; /* Increased space between live areas */
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background-color: var(--pico-code-background-color);
+    font-family: var(--pico-font-family);
+    font-size: 0.95em;
+    max-height: 400px; /* Limit height */
+    overflow-y: auto; /* Allow scrolling if content exceeds max height */
+    color: var(--pico-muted-color); /* Dimmer text while streaming */
+}
+#report-container h2 {
+    margin-bottom: 0.5rem; /* Reduce space below live area headings */
+}
+#report-container p em {
+    font-size: 0.9em; /* Smaller italic helper text */
+    color: var(--pico-muted-color);
+}
+
+/* --- Progress Log Styling --- */
+.progress-log { margin-top: 1.5rem; }
+#progress-list {
+    max-height: 350px; /* Slightly larger */
+    overflow-y: auto;
+    background-color: var(--pico-background-color); /* Match main background */
+    padding: 15px;
+    border-radius: var(--pico-border-radius);
+    border: 1px solid var(--pico-muted-border-color);
+    font-size: 0.9em;
+    list-style: none;
+    padding-left: 15px;
+}
+#progress-list li {
+    margin-bottom: 6px;
+    padding-left: 12px;
+    border-left: 3px solid var(--pico-secondary-border); /* Use secondary color */
+    word-wrap: break-word;
+}
+#progress-list li.error {
+    color: var(--pico-color-red);
+    font-weight: 600; /* Slightly bolder */
+    border-left-color: var(--pico-color-red);
+}
+#progress-list li.fatal-error {
+    color: var(--pico-color-red); /* Use same red */
+    font-weight: 700; /* Bolder */
+    border-left-color: var(--pico-color-red);
+    background-color: rgba(255, 0, 0, 0.05); /* Faint red background */
+}
+
+/* Loader */
+.loader {
+    border: 4px solid var(--pico-form-element-background-color);
+    border-top: 4px solid var(--pico-primary);
+    border-radius: 50%;
+    width: 20px; height: 20px;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+    margin-left: 10px;
+    vertical-align: middle;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+.hidden { display: none; }
+
+/* --- Media Queries for Responsiveness (Optional) --- */
+@media (max-width: 768px) {
+    #final-report-display {
+        padding: 1rem;
+    }
+    #report-display h1 {
+        font-size: 1.8rem;
+    }
+    #report-display h2 {
+        font-size: 1.5rem;
+    }
+    #report-actions {
+        flex-direction: column; /* Stack buttons vertically */
+        align-items: flex-start; /* Align buttons to the left */
+    }
+    #report-actions h3 {
+        flex-basis: auto; /* Reset basis */
+        margin-bottom: 0.8rem;
+    }
 }
