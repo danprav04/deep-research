@@ -16,12 +16,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let eventSource = null;
     const encodedTopic = document.body.dataset.encodedTopic || "";
 
-    // --- <<< DEBUGGING LOG >>> ---
-    // Check if marked and DOMPurify are available when the script runs
+    // --- DEBUGGING LOG ---
     console.log('results.js executing. Checking libraries:');
     console.log('typeof marked:', typeof marked);
     console.log('typeof DOMPurify:', typeof DOMPurify);
-    // --- <<< END DEBUGGING LOG >>> ---
+    // --- END DEBUGGING LOG ---
 
     // --- Helper Functions ---
 
@@ -104,32 +103,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 let finalHtml = "<article><p><em>Error: Report content is empty or invalid.</em></p></article>";
 
                 if (reportContent && typeof reportContent === 'string') {
-                    // --- Check if marked library is loaded ---
-                    if (typeof marked === 'function' && typeof DOMPurify === 'object') {
+                    // Check if the necessary functions are available
+                    if (typeof marked?.parse === 'function' && typeof DOMPurify?.sanitize === 'function') {
+                        console.log("Libraries check passed inside showFinalReport."); // You already see this log
+
+                        // --- <<< ADD LOGGING HERE >>> ---
                         const rawHtml = marked.parse(reportContent);
+                        console.log("--- Raw HTML from marked.parse ---");
+                        console.log(rawHtml); // Log the direct output of marked
+
                         finalHtml = DOMPurify.sanitize(rawHtml, {
                             USE_PROFILES: { html: true },
-                            ADD_ATTR: ['data-tooltip', 'aria-label', 'role', 'id', 'href'], // Allow id/href for footnotes
-                            ADD_TAGS: ['sup', 'section', 'div', 'li', 'ol', 'ul', 'a', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'code', 'pre', 'blockquote'], // Common Markdown elements + footnote structure
+                            ADD_ATTR: ['data-tooltip', 'aria-label', 'role', 'id', 'href'],
+                            ADD_TAGS: ['sup', 'section', 'div', 'li', 'ol', 'ul', 'a', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'code', 'pre', 'blockquote'],
                             ALLOW_DATA_ATTR: true,
-                            FORCE_BODY: false // Let PicoCSS handle body styles
+                            FORCE_BODY: false
                         });
+                        console.log("--- Sanitized HTML from DOMPurify ---");
+                        console.log(finalHtml); // Log the output after sanitization
+                        // --- <<< END LOGGING >>> ---
+
                     } else {
-                         // --- This is the path that was likely taken before ---
-                        console.error("Marked.js or DOMPurify library not loaded correctly. Cannot render Markdown safely.");
-                        console.error('Current status - typeof marked:', typeof marked, 'typeof DOMPurify:', typeof DOMPurify);
-                        addProgress("Error: Markdown renderer or sanitizer is missing. Cannot display final report correctly.", true);
-                        finalHtml = `<article><p><em>Error: Markdown renderer is missing. Displaying raw content:</em></p><pre><code>${escapeHtml(reportContent)}</code></pre></article>`;
+                        // Fallback error logging (shouldn't be hit now)
+                        console.error("Error: Marked.js or DOMPurify library functions (parse/sanitize) not available when needed.");
+                        console.error('Current status inside showFinalReport - typeof marked:', typeof marked, 'typeof marked.parse:', typeof marked?.parse, '| typeof DOMPurify:', typeof DOMPurify, 'typeof DOMPurify.sanitize:', typeof DOMPurify?.sanitize);
+                        addProgress("Error: Markdown renderer or sanitizer functions missing. Cannot display final report correctly.", true);
+                        finalHtml = `<article><p><em>Error: Markdown renderer/sanitizer is missing. Displaying raw content:</em></p><pre><code>${escapeHtml(reportContent)}</code></pre></article>`;
                     }
                 }
 
+                console.log("Setting innerHTML for report-display..."); // Log before setting
                 reportDisplayDiv.innerHTML = finalHtml;
+                console.log("Finished setting innerHTML."); // Log after setting
                 addCitationTooltips(); // Apply tooltips AFTER content is injected
 
             } catch (e) {
-                console.error("Error rendering final report:", e);
-                addProgress(`Error displaying final report: ${e.message}`, true);
-                reportDisplayDiv.innerHTML = "<article><p><em>An error occurred while rendering the report. Please check the console.</em></p></article>";
+                 console.error("Error rendering final report:", e);
+                 addProgress(`Error displaying final report: ${e.message}`, true);
+                 reportDisplayDiv.innerHTML = "<article><p><em>An error occurred while rendering the report. Please check the console.</em></p></article>";
             }
         } else {
             console.error("Final report display area not found.");
@@ -259,19 +270,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     finalReportDisplay.classList.remove('hidden');
                 }
             }
-            // Browser might auto-retry, don't close here unless specific errors warrant it.
         };
     }
 
     // --- Initial Setup ---
-    // Check libraries are loaded *before* connecting
-     if (typeof marked !== 'function' || typeof DOMPurify !== 'object') {
-         console.error("Required libraries (marked.js or DOMPurify) not found on initial load. Report rendering will likely fail.");
-         addProgress("Error: Essential rendering library (marked.js or DOMPurify) failed to load. Please check network connection and browser console.", true, true);
-         // Optionally prevent connection if libraries are critical
-         // if (loader) loader.classList.add('hidden');
-         // return;
-     }
+    // Removed the initial check here as it seemed unreliable timing-wise.
+    // The check inside showFinalReport is the critical one.
 
     connectSSE(); // Start the SSE connection
 
