@@ -29,36 +29,36 @@ www.deep-research-tool.online {
     redir https://deep-research-tool.online{uri} permanent
 }
 
-deep-research.mooo.com {
-    # Optional: Enable better logging (logs to systemd journal by default)
-    log {
-        output stderr
-        format console
-    }
+# deep-research.mooo.com {
+#     # Optional: Enable better logging (logs to systemd journal by default)
+#     log {
+#         output stderr
+#         format console
+#     }
 
-    # Recommended: Enable compression for faster loading
-    encode gzip zstd
+#     # Recommended: Enable compression for faster loading
+#     encode gzip zstd
 
-    # Recommended: Add useful security headers
-    header {
-        # Enable HTTP Strict Transport Security (HSTS) - Tells browsers
-        # Be sure HTTPS is working reliably before uncommenting the full
-        # Start with a short max-age for testing if unsure.
-        # Strict-Transport-Security "max-age=31536000;" always
-        X-Frame-Options "SAMEORIGIN" always
-        X-Content-Type-Options "nosniff" always
-        Referrer-Policy "strict-origin-when-cross-origin" always
-        # Remove Caddy's Server signature
-        -Server
-    }
+#     # Recommended: Add useful security headers
+#     header {
+#         # Enable HTTP Strict Transport Security (HSTS) - Tells browsers
+#         # Be sure HTTPS is working reliably before uncommenting the full
+#         # Start with a short max-age for testing if unsure.
+#         # Strict-Transport-Security "max-age=31536000;" always
+#         X-Frame-Options "SAMEORIGIN" always
+#         X-Content-Type-Options "nosniff" always
+#         Referrer-Policy "strict-origin-when-cross-origin" always
+#         # Remove Caddy's Server signature
+#         -Server
+#     }
 
-    # The essential part: Reverse proxy to your Gunicorn app running on port 8000 (assuming it uses the same backend)
-    reverse_proxy localhost:8000
-}
+#     # The essential part: Reverse proxy to your Gunicorn app running on port 8000 (assuming it uses the same backend)
+#     reverse_proxy localhost:8000
+# }
 
-www.deep-research.mooo.com {
-    redir https://deep-research.mooo.com{uri} permanent
-}
+# www.deep-research.mooo.com {
+#     redir https://deep-research.mooo.com{uri} permanent
+# }
 
 macros-counter.mooo.com {
     # Optional: Enable better logging
