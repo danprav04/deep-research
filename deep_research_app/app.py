@@ -1,4 +1,3 @@
-
 # app.py
 import sys
 import os
@@ -11,7 +10,8 @@ from typing import Dict, Any, Generator, List, Optional
 
 from flask import (
     Flask, render_template, request, redirect, url_for, jsonify,
-    Response, stream_with_context, current_app, make_response
+    Response, stream_with_context, current_app, make_response,
+    send_from_directory # Added for favicon
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -51,26 +51,39 @@ def setup_logging():
             return
 
     # Use TimedRotatingFileHandler for automatic rotation
-    file_handler = logging.handlers.TimedRotatingFileHandler(
-        log_file, when='midnight', interval=1, backupCount=config.LOG_ROTATION_DAYS, encoding='utf-8'
-    )
-    file_handler.setLevel(log_level)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] %(message)s')
-    file_handler.setFormatter(formatter)
+    # Ensure logs directory exists before setting up handler
+    if log_dir: # Check again in case creation failed silently
+        file_handler = logging.handlers.TimedRotatingFileHandler(
+            log_file, when='midnight', interval=1, backupCount=config.LOG_ROTATION_DAYS, encoding='utf-8'
+        )
+        file_handler.setLevel(log_level)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] %(message)s')
+        file_handler.setFormatter(formatter)
+        handlers = [file_handler]
+    else:
+        handlers = [logging.StreamHandler(sys.stderr)] # Log to stderr if file logging failed
 
     # Configure root logger
-    logging.basicConfig(level=log_level, handlers=[file_handler], format='%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] %(message)s')
+    logging.basicConfig(level=log_level, handlers=handlers, format='%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] %(message)s')
 
     # Get Flask's logger and add our handler to it
     # Also configure Werkzeug logger to use our handler
     flask_logger = logging.getLogger('flask.app')
     werkzeug_logger = logging.getLogger('werkzeug')
-    flask_logger.addHandler(file_handler)
-    werkzeug_logger.addHandler(file_handler)
+    for handler in handlers:
+        flask_logger.addHandler(handler)
+        werkzeug_logger.addHandler(handler)
     flask_logger.setLevel(log_level)
-    werkzeug_logger.setLevel(log_level) # Can set to WARNING for less noise in prod
+    werkzeug_logger.setLevel(logging.WARNING) # Set Werkzeug to WARNING for less noise in prod logs
 
-    logging.getLogger().info(f"Logging configured. Level: {log_level_str}, File: {log_file}, Rotation: {config.LOG_ROTATION_DAYS} days.")
+    # Prevent Flask's default handlers if we added ours
+    flask_logger.propagate = False
+    # If logging to stderr, we don't need Werkzeug's default handler either
+    if any(isinstance(h, logging.StreamHandler) for h in handlers):
+        werkzeug_logger.propagate = False
+
+
+    logging.getLogger().info(f"Logging configured. Level: {log_level_str}, Target: {'File ('+log_file+')' if log_dir else 'stderr'}, Rotation: {config.LOG_ROTATION_DAYS} days.")
 
 setup_logging()
 logger = logging.getLogger(__name__) # Use module-specific logger after setup
@@ -162,11 +175,8 @@ def stream():
             try:
                 # Ensure complex objects are handled (though basic types are expected)
                 payload = json.dumps(data)
-                # Replace newlines in the payload to prevent premature event termination
-                # payload = payload.replace('\n', '\\n').replace('\r', '\\r') # Not strictly needed if client handles JSON correctly
                 return f"data: {payload}\n\n"
             except TypeError as e:
-                # Log error, create safe fallback event
                 current_app.logger.error(f"Error serializing data for SSE: {e}. Data: {data}", exc_info=False) # Avoid logging potentially large data
                 safe_data = {'type': data.get('type', 'error'), 'message': f"Serialization Error: Could not format server event."}
                 try:
@@ -174,7 +184,6 @@ def stream():
                     return f"data: {payload}\n\n"
                 except Exception as inner_e:
                     current_app.logger.error(f"Internal server error during fallback SSE event serialization: {inner_e}")
-                    # Final fallback: a generic error message
                     return "data: {\"type\": \"error\", \"message\": \"Internal server error during SSE event processing.\"}\n\n"
 
         try:
@@ -189,7 +198,6 @@ def stream():
                     is_fatal = event_data.get('is_fatal', False)
                     log_func = current_app.logger.error if is_error or is_fatal else current_app.logger.info
                     log_prefix = "FATAL SSE:" if is_fatal else "ERROR SSE:" if is_error else "PROGRESS SSE:"
-                    # Limit log message length if necessary
                     log_func(f"{log_prefix} {message[:500]}{'...' if len(message) > 500 else ''}")
                     yield format_sse_event({'type': 'error' if is_error or is_fatal else 'progress', 'message': message, 'fatal': is_fatal})
 
@@ -199,7 +207,6 @@ def stream():
                         filepath = metadata['temp_filepath']
                         temp_files_to_clean.append(filepath)
                         current_app.logger.debug(f"Tracking temp file for cleanup: {os.path.basename(filepath)}")
-                    # No direct SSE message needed here, progress is handled by orchestrator
 
                 elif event_type == 'event': # Generic event wrapper for things like 'complete'
                      inner_event_data = event_data.get('data', {})
@@ -209,12 +216,10 @@ def stream():
                     current_app.logger.warning(f"Received unknown event type from orchestrator: {event_type}")
                     yield format_sse_event({'type': 'error', 'message': f'Unknown server event type received: {event_type}', 'fatal': False})
 
-            # Orchestrator finished normally (completion event yielded via 'event')
             current_app.logger.info(f"Orchestrator generator finished normally for topic: '{topic}'.")
 
         except Exception as e:
             current_app.logger.error(f"FATAL: Unexpected error during stream generation for topic '{topic}': {e}", exc_info=True)
-            # Use a generic error message for the client, avoid leaking internal details
             error_msg = "An unexpected server error occurred during the research process. Please check server logs."
             try:
                 yield format_sse_event({'type': 'error', 'message': error_msg, 'fatal': True})
@@ -235,7 +240,6 @@ def stream():
                               current_app.logger.debug(f"Removed temp file: {os.path.basename(fpath)}")
                          elif not os.path.exists(fpath):
                               current_app.logger.debug(f"Temp file already removed or path invalid: {fpath}")
-                              # Count as cleaned if it's already gone
                               cleaned_count +=1
                      except OSError as e:
                          current_app.logger.warning(f"Failed to remove temp file {os.path.basename(fpath)}: {e}")
@@ -247,25 +251,24 @@ def stream():
             else:
                  current_app.logger.info(f"No temporary files tracked for cleanup for topic '{topic}'.")
 
-            # Signal stream termination clearly
             current_app.logger.info(f"SSE stream processing definitively finished for topic: '{topic}'")
             try:
                 yield format_sse_event({'type': 'stream_terminated'})
             except Exception as yield_err:
                  current_app.logger.error(f"Failed to yield final stream_terminated message: {yield_err}")
 
-    # Set headers for Server-Sent Events
+    # --- Set headers for Server-Sent Events (SSE) ---
+    # DO NOT set 'Connection: keep-alive' here - it violates WSGI spec (PEP 3333)
+    # The WSGI server (Gunicorn/Waitress) handles connection persistence.
     headers = {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        # 'X-Accel-Buffering': 'no', # Crucial for Nginx, less so for Caddy? Good practice.
+        # 'X-Accel-Buffering': 'no', # Primarily for Nginx, uncomment if using Nginx & experiencing buffering
     }
     # Use stream_with_context to ensure context is available during generation
-    # Wrap in Response object
     response = Response(stream_with_context(generate_updates()), mimetype='text/event-stream', headers=headers)
-    # Apply X-Accel-Buffering header specifically for Nginx compatibility if needed
-    response.headers['X-Accel-Buffering'] = 'no'
+    # Optional: Add X-Accel-Buffering header specifically if needed for Nginx proxy
+    # response.headers['X-Accel-Buffering'] = 'no'
     return response
 
 
@@ -273,26 +276,70 @@ def stream():
 def health_check():
     """Basic health check endpoint."""
     # Could add checks here (e.g., LLM connectivity, DB status if used)
-    return jsonify({"status": "ok"}), 200
+    # Example: Check LLM model availability
+    llm_ok = False
+    try:
+        # Perform a lightweight check, e.g., list models (if API allows)
+        # Or just assume configured is enough for basic check
+        if config.GOOGLE_API_KEY and config.GOOGLE_MODEL_NAME:
+            # genai.get_model(f'models/{config.GOOGLE_MODEL_NAME}') # This might be too slow/costly for health check
+            llm_ok = True # Basic check: Assume OK if configured
+    except Exception as e:
+        logger.warning(f"Health check: LLM configuration check failed: {e}", exc_info=False)
+
+    status = {"status": "ok", "llm_configured": llm_ok}
+    http_status = 200 if llm_ok else 503 # Service Unavailable if LLM isn't ready
+
+    return jsonify(status), http_status
+
+# --- Favicon Route (Optional but Recommended) ---
+@app.route('/favicon.ico')
+def favicon():
+    # Serve a favicon file if you have one in static/
+    # return send_from_directory(os.path.join(app.root_path, 'static'),
+    #                           'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    # Or simply return 204 No Content if you don't have one
+    return '', 204
 
 # --- Error Handlers ---
 @app.errorhandler(429)
 def ratelimit_handler(e):
+    """Handles rate limit errors."""
     logger.warning(f"Rate limit exceeded: {e.description} from {get_remote_address()}")
-    return make_response(jsonify(error=f"Rate limit exceeded: {e.description}"), 429)
+    # Simple JSON response for API-like errors, or render template
+    # return make_response(jsonify(error=f"Rate limit exceeded: {e.description}"), 429)
+    # Render a simple error page instead
+    return render_template('error.html', error_code=429, error_message=f"Too many requests: {e.description}. Please try again later."), 429
 
 @app.errorhandler(404)
 def not_found_error(error):
-     logger.warning(f"404 Not Found: {request.path}")
-     return render_template('404.html'), 404 # You would need to create a 404.html template
+    """Handles 404 Not Found errors."""
+    logger.warning(f"404 Not Found: {request.path} ({error})")
+    return render_template('404.html'), 404
 
 @app.errorhandler(500)
 def internal_error(error):
-     # Log the error with stack trace
-     logger.error(f"Internal Server Error (500): {error}", exc_info=True)
-     # Return a generic error page/message
-     return render_template('500.html'), 500 # You would need to create a 500.html template
+    """Handles 500 Internal Server errors."""
+    # Log the error with stack trace
+    logger.error(f"Internal Server Error (500): {error}", exc_info=True)
+    # Return a generic error page/message
+    return render_template('500.html'), 500
+
+# Catch-all for other Werkzeug/HTTP exceptions
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Handles unexpected exceptions."""
+    # Handle specific HTTP exceptions if needed, otherwise treat as 500
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        # Use the exception's default response if available
+        return e
+    # Log the full exception details for non-HTTP errors
+    logger.error(f"Unhandled Exception: {e}", exc_info=True)
+    # Return the generic 500 error page
+    return render_template('500.html'), 500
 
 # Note: Removed the `if __name__ == '__main__':` block.
-# Use a WSGI server like Gunicorn to run the app in production.
-# Example command: gunicorn --bind 0.0.0.0:8000 deep_research_app.app:app
+# Use a WSGI server like Gunicorn or Waitress to run the app.
+# Example command: waitress-serve --host 0.0.0.0 --port 8000 deep_research_app.app:app
+# Or: gunicorn --bind 0.0.0.0:8000 deep_research_app.app:app

@@ -1,6 +1,109 @@
-2025-04-12 16:51:02,496 - INFO - [root:73] Logging configured. Level: INFO, File: ./logs/deep_research.log, Rotation: 7 days.
-2025-04-12 16:51:02,498 - INFO - [__main__:86] Rate limiting configured with default: 15 per minute
-2025-04-12 16:51:02,498 - INFO - [__main__:99] Google Generative AI configured with model: gemini-2.0-flash
-2025-04-12 16:53:00,911 - INFO - [root:73] Logging configured. Level: INFO, File: ./logs/deep_research.log, Rotation: 7 days.
-2025-04-12 16:53:00,912 - INFO - [__main__:86] Rate limiting configured with default: 15 per minute
-2025-04-12 16:53:00,912 - INFO - [__main__:99] Google Generative AI configured with model: gemini-2.0-flash
+2025-04-12 17:05:19,446 - INFO - [root:86] Logging configured. Level: INFO, Target: File (./logs/deep_research.log), Rotation: 7 days.
+2025-04-12 17:05:19,447 - INFO - [app:99] Rate limiting configured with default: 15 per minute
+2025-04-12 17:05:19,447 - INFO - [app:112] Google Generative AI configured with model: gemini-2.0-flash
+2025-04-12 17:05:19,451 - INFO - [waitress:449] Serving on http://0.0.0.0:8000
+2025-04-12 17:05:28,059 - INFO - [app:141] Redirecting to results page for topic: 'watermelons' (Encoded: watermelons)
+2025-04-12 17:05:28,250 - INFO - [app:168] SSE stream started for topic: 'watermelons'
+2025-04-12 17:05:28,250 - INFO - [research_orchestrator:71] Starting research process for topic: 'watermelons'
+2025-04-12 17:05:28,250 - INFO - [app:201] PROGRESS SSE: Generating research plan for: 'watermelons'...
+2025-04-12 17:05:28,251 - INFO - [llm_interface:72] Calling Gemini model gemini-2.0-flash (non-streaming). Prompt length: ~1k chars.
+2025-04-12 17:05:30,469 - INFO - [llm_interface:88] Gemini non-stream call attempt 1 completed in 2.22s.
+2025-04-12 17:05:30,470 - INFO - [llm_interface:149] Gemini call successful. Response length: 1307 chars.
+2025-04-12 17:05:30,471 - INFO - [utils:181] Attempting to parse research plan using method: json block
+2025-04-12 17:05:30,471 - INFO - [utils:219] Successfully parsed and validated research plan with 7 steps.
+2025-04-12 17:05:30,472 - INFO - [app:201] PROGRESS SSE: Generated 7 step plan.
+2025-04-12 17:05:30,472 - INFO - [app:201] PROGRESS SSE:   Step 1: Trace the origin and history of watermelons (Keywords: ['watermelon origin', 'watermelon domestication', 'ancient watermelon cultivation'])
+2025-04-12 17:05:30,473 - INFO - [app:201] PROGRESS SSE:   Step 2: Describe the nutritional composition and health benefits of watermelons (Keywords: ['watermelon nutrition facts', 'watermelon health benefits', 'watermelon vitamins minerals'])
+2025-04-12 17:05:30,473 - INFO - [app:201] PROGRESS SSE:   Step 3: Outline optimal growing conditions and common cultivation practices for watermelons (Keywords: ['watermelon growing conditions', 'watermelon cultivation techniques', 'watermelon soil requirements'])
+2025-04-12 17:05:30,474 - INFO - [app:201] PROGRESS SSE:   Step 4: Identify common watermelon varieties and their characteristics (Keywords: ['watermelon varieties', 'seedless watermelon types', 'heirloom watermelon varieties'])
+2025-04-12 17:05:30,474 - INFO - [app:201] PROGRESS SSE:   Step 5: Discuss common pests and diseases affecting watermelons and methods for their control (Keywords: ['watermelon pests', 'watermelon diseases', 'watermelon pest control'])
+2025-04-12 17:05:30,475 - INFO - [app:201] PROGRESS SSE:   Step 6: Analyze the global watermelon market and economic significance (Keywords: ['watermelon market analysis', 'watermelon production statistics', 'watermelon exporting countries'])
+2025-04-12 17:05:30,475 - INFO - [app:201] PROGRESS SSE:   Step 7: Explore innovative uses of watermelons beyond direct consumption (Keywords: ['watermelon seed uses', 'watermelon rind recipes', 'watermelon juice benefits'])
+2025-04-12 17:05:30,476 - INFO - [app:201] PROGRESS SSE: Starting web search...
+2025-04-12 17:05:30,476 - INFO - [app:201] PROGRESS SSE: Searching - Step 1/7: 'Trace the origin and history of watermelons'
+2025-04-12 17:05:30,477 - INFO - [web_research:47] Searching DuckDuckGo for: 'watermelon origin watermelon domestication ancient watermelon cultivation' (max_results=5)
+2025-04-12 17:05:31,675 - INFO - [primp:450] response: https://lite.duckduckgo.com/lite/ 200
+2025-04-12 17:05:31,693 - INFO - [web_research:74] DuckDuckGo search for 'watermelon origin watermelon domestication ancient watermelon cultivation' successful (Attempt 1). Found 5 raw results, yielding 5 valid URLs.
+2025-04-12 17:05:31,694 - INFO - [web_research:154] Web search for keywords 'watermelon origin watermelon domestication ancient watermelon cultivation' completed. Found 5 unique URLs. Encountered 0 errors.
+2025-04-12 17:05:31,694 - INFO - [app:201] PROGRESS SSE:   -> Found 5 URLs (5 new). Total unique: 5.
+2025-04-12 17:05:33,196 - INFO - [app:201] PROGRESS SSE: Searching - Step 2/7: 'Describe the nutritional composition and health benefits of watermelon...'
+2025-04-12 17:05:33,197 - INFO - [web_research:47] Searching DuckDuckGo for: 'watermelon nutrition facts watermelon health benefits watermelon vitamins minerals' (max_results=5)
+2025-04-12 17:05:34,298 - INFO - [primp:450] response: https://html.duckduckgo.com/html 200
+2025-04-12 17:05:34,306 - INFO - [web_research:74] DuckDuckGo search for 'watermelon nutrition facts watermelon health benefits watermelon vitamins minerals' successful (Attempt 1). Found 5 raw results, yielding 5 valid URLs.
+2025-04-12 17:05:34,307 - INFO - [web_research:154] Web search for keywords 'watermelon nutrition facts watermelon health benefits watermelon vitamins minerals' completed. Found 5 unique URLs. Encountered 0 errors.
+2025-04-12 17:05:34,307 - INFO - [app:201] PROGRESS SSE:   -> Found 5 URLs (5 new). Total unique: 10.
+2025-04-12 17:05:35,808 - INFO - [app:201] PROGRESS SSE: Searching - Step 3/7: 'Outline optimal growing conditions and common cultivation practices fo...'
+2025-04-12 17:05:35,809 - INFO - [web_research:47] Searching DuckDuckGo for: 'watermelon growing conditions watermelon cultivation techniques watermelon soil requirements' (max_results=5)
+2025-04-12 17:05:36,929 - INFO - [primp:450] response: https://lite.duckduckgo.com/lite/ 200
+2025-04-12 17:05:36,937 - INFO - [web_research:74] DuckDuckGo search for 'watermelon growing conditions watermelon cultivation techniques watermelon soil requirements' successful (Attempt 1). Found 5 raw results, yielding 5 valid URLs.
+2025-04-12 17:05:36,937 - INFO - [web_research:154] Web search for keywords 'watermelon growing conditions watermelon cultivation techniques watermelon soil requirements' completed. Found 5 unique URLs. Encountered 0 errors.
+2025-04-12 17:05:36,938 - INFO - [app:201] PROGRESS SSE:   -> Found 5 URLs (5 new). Total unique: 15.
+2025-04-12 17:05:38,439 - INFO - [app:201] PROGRESS SSE: Searching - Step 4/7: 'Identify common watermelon varieties and their characteristics'
+2025-04-12 17:05:38,440 - INFO - [web_research:47] Searching DuckDuckGo for: 'watermelon varieties seedless watermelon types heirloom watermelon varieties' (max_results=5)
+2025-04-12 17:05:39,522 - INFO - [primp:450] response: https://html.duckduckgo.com/html 200
+2025-04-12 17:05:39,530 - INFO - [web_research:74] DuckDuckGo search for 'watermelon varieties seedless watermelon types heirloom watermelon varieties' successful (Attempt 1). Found 5 raw results, yielding 5 valid URLs.
+2025-04-12 17:05:39,530 - INFO - [web_research:154] Web search for keywords 'watermelon varieties seedless watermelon types heirloom watermelon varieties' completed. Found 5 unique URLs. Encountered 0 errors.
+2025-04-12 17:05:39,531 - INFO - [app:201] PROGRESS SSE:   -> Found 5 URLs (5 new). Total unique: 20.
+2025-04-12 17:05:41,031 - INFO - [app:201] PROGRESS SSE: Searching - Step 5/7: 'Discuss common pests and diseases affecting watermelons and methods fo...'
+2025-04-12 17:05:41,031 - INFO - [web_research:47] Searching DuckDuckGo for: 'watermelon pests watermelon diseases watermelon pest control' (max_results=5)
+2025-04-12 17:05:42,139 - INFO - [primp:450] response: https://lite.duckduckgo.com/lite/ 200
+2025-04-12 17:05:42,143 - INFO - [web_research:74] DuckDuckGo search for 'watermelon pests watermelon diseases watermelon pest control' successful (Attempt 1). Found 5 raw results, yielding 5 valid URLs.
+2025-04-12 17:05:42,143 - INFO - [web_research:154] Web search for keywords 'watermelon pests watermelon diseases watermelon pest control' completed. Found 5 unique URLs. Encountered 0 errors.
+2025-04-12 17:05:42,143 - INFO - [app:201] PROGRESS SSE:   -> Found 5 URLs (5 new). Total unique: 25.
+2025-04-12 17:05:43,645 - INFO - [app:201] PROGRESS SSE: Searching - Step 6/7: 'Analyze the global watermelon market and economic significance'
+2025-04-12 17:05:43,646 - INFO - [web_research:47] Searching DuckDuckGo for: 'watermelon market analysis watermelon production statistics watermelon exporting countries' (max_results=5)
+2025-04-12 17:05:44,796 - INFO - [primp:450] response: https://html.duckduckgo.com/html 200
+2025-04-12 17:05:44,804 - INFO - [web_research:74] DuckDuckGo search for 'watermelon market analysis watermelon production statistics watermelon exporting countries' successful (Attempt 1). Found 5 raw results, yielding 5 valid URLs.
+2025-04-12 17:05:44,804 - INFO - [web_research:154] Web search for keywords 'watermelon market analysis watermelon production statistics watermelon exporting countries' completed. Found 5 unique URLs. Encountered 0 errors.
+2025-04-12 17:05:44,804 - INFO - [app:201] PROGRESS SSE:   -> Found 5 URLs (5 new). Total unique: 30.
+2025-04-12 17:05:46,306 - INFO - [app:201] PROGRESS SSE: Searching - Step 7/7: 'Explore innovative uses of watermelons beyond direct consumption'
+2025-04-12 17:05:46,307 - INFO - [web_research:47] Searching DuckDuckGo for: 'watermelon seed uses watermelon rind recipes watermelon juice benefits' (max_results=5)
+2025-04-12 17:05:47,505 - INFO - [primp:450] response: https://lite.duckduckgo.com/lite/ 200
+2025-04-12 17:05:47,512 - INFO - [web_research:74] DuckDuckGo search for 'watermelon seed uses watermelon rind recipes watermelon juice benefits' successful (Attempt 1). Found 5 raw results, yielding 5 valid URLs.
+2025-04-12 17:05:47,513 - INFO - [web_research:154] Web search for keywords 'watermelon seed uses watermelon rind recipes watermelon juice benefits' completed. Found 5 unique URLs. Encountered 0 errors.
+2025-04-12 17:05:47,513 - INFO - [app:201] PROGRESS SSE:   -> Found 5 URLs (5 new). Total unique: 35.
+2025-04-12 17:05:47,514 - INFO - [app:201] PROGRESS SSE: Search phase completed in 17.04s.
+2025-04-12 17:05:47,514 - INFO - [app:201] PROGRESS SSE: Collected 35 total unique URLs from 7 queries.
+2025-04-12 17:05:47,515 - INFO - [app:201] PROGRESS SSE: Filtering URLs for scraping...
+2025-04-12 17:05:47,515 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://benefits-of-things.com/watermelon-rind-benefits-and-uses/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,516 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://cultivationag.com/history-of-watermelons/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,516 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://essfeed.com/global-watermelon-industry-report-2025-market-tren...': name 'urlparse' is not defined
+2025-04-12 17:05:47,516 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://essfeed.com/global-watermelon-market-size/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,517 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://essfeed.com/top-10-watermelon-importing-exporting-countries-tr...': name 'urlparse' is not defined
+2025-04-12 17:05:47,517 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://extension.psu.edu/watermelon-production...': name 'urlparse' is not defined
+2025-04-12 17:05:47,517 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://gardenerspath.com/plants/fruit/best-watermelon-varieties/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,518 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://ipm.missouri.edu/MEG/2020/7/watermelon-DT/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,518 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://melonwatermelonhaven.com/10-best-watermelon-varieties-for-home...': name 'urlparse' is not defined
+2025-04-12 17:05:47,518 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://melonwatermelonhaven.com/5-creative-ways-to-use-watermelon-rin...': name 'urlparse' is not defined
+2025-04-12 17:05:47,518 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://melonwatermelonhaven.com/5-essential-tips-to-protect-your-wate...': name 'urlparse' is not defined
+2025-04-12 17:05:47,519 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://minnetonkaorchards.com/seedless-watermelon/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,519 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://plantvillage.psu.edu/topics/watermelon/infos...': name 'urlparse' is not defined
+2025-04-12 17:05:47,519 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://smallbusiness.missouri.edu/the-watermelons-journey-10-facts-ab...': name 'urlparse' is not defined
+2025-04-12 17:05:47,520 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://thesuburbangarden.net/planting-watermelon/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,520 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://thriveogarden.com/different-types-of-watermelon-plants/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,520 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://watermelontimes.com/watermelon-history/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,521 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://worldostats.com/country-stats/watermelon-production-by-country...': name 'urlparse' is not defined
+2025-04-12 17:05:47,521 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.almanac.com/plant/watermelons...': name 'urlparse' is not defined
+2025-04-12 17:05:47,521 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.clearwaterswellness.com/benefits-of-watermelon-juice-with-...': name 'urlparse' is not defined
+2025-04-12 17:05:47,522 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.epicgardening.com/watermelon-diseases/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,522 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.epicgardening.com/watermelon-pests/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,522 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.foodrepublic.com/1408235/ways-use-leftover-watermelon-rind...': name 'urlparse' is not defined
+2025-04-12 17:05:47,523 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.gardeningchannel.com/best-watermelon-varieties-to-plant/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,523 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.healthline.com/nutrition/foods/watermelon...': name 'urlparse' is not defined
+2025-04-12 17:05:47,524 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.healthline.com/nutrition/watermelon-health-benefits...': name 'urlparse' is not defined
+2025-04-12 17:05:47,524 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.healthyandnaturalworld.com/watermelon-benefits-and-nutriti...': name 'urlparse' is not defined
+2025-04-12 17:05:47,524 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.itfnet.org/v1/2016/05/watermelon-pest-disease-management/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,525 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.nationalgeographic.com/history/article/150821-watermelon-f...': name 'urlparse' is not defined
+2025-04-12 17:05:47,525 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.nutritionadvance.com/watermelon-nutrition-benefits/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,525 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.origeneseeds.com/public/post/cultivation-techniques-for-wa...': name 'urlparse' is not defined
+2025-04-12 17:05:47,526 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.starkeayres.com/uploads/files/Watermelon-Production-Guidel...': name 'urlparse' is not defined
+2025-04-12 17:05:47,526 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.verywellfit.com/nutrition-facts-and-watermelon-carbs-10875...': name 'urlparse' is not defined
+2025-04-12 17:05:47,527 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.watermelon.org/the-slice/three-ways-to-eat-watermelon-rind...': name 'urlparse' is not defined
+2025-04-12 17:05:47,527 - WARNING - [research_orchestrator:230] Error during URL filtering for 'https://www.worldstopexports.com/watermelon-exports-by-country/...': name 'urlparse' is not defined
+2025-04-12 17:05:47,527 - INFO - [app:201] PROGRESS SSE: Selected 0 URLs for scraping after filtering (35 skipped, limit was 15).
+2025-04-12 17:05:47,528 - ERROR - [research_orchestrator:237] No suitable URLs found to scrape after search and filtering.
+2025-04-12 17:05:47,528 - ERROR - [app:201] FATAL SSE: Fatal Error: No suitable URLs found to scrape. Cannot proceed. Try broadening the topic or checking search engine status.
+2025-04-12 17:05:47,529 - ERROR - [research_orchestrator:717] Orchestrator generator stopped prematurely due to fatal error for topic: 'watermelons'.
+2025-04-12 17:05:47,529 - INFO - [app:219] Orchestrator generator finished normally for topic: 'watermelons'.
+2025-04-12 17:05:47,529 - INFO - [app:252] No temporary files tracked for cleanup for topic 'watermelons'.
+2025-04-12 17:05:47,530 - INFO - [app:254] SSE stream processing definitively finished for topic: 'watermelons'

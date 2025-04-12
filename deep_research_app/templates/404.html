@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Page Not Found</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='pico.min.css', _external=True) }}">
+    <style>
+        body { display: flex; justify-content: center; align-items: center; min-height: 90vh; text-align: center; }
+        article { max-width: 500px; }
+        h1 { margin-bottom: 0.5rem; color: var(--pico-color-red); }
+        p { margin-bottom: 1.5rem; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <article>
+            <h1>404 - Not Found</h1>
+            <p>Sorry, the page you are looking for does not exist or could not be found.</p>
+            <a href="{{ url_for('index') }}" role="button">Go to Homepage</a>
+        </article>
+    </main>
+     <!-- Theme Application Script -->
+     <script>
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-theme', currentTheme);
+    </script>
+</body>
+</html>
