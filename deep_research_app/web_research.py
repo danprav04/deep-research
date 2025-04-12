@@ -11,7 +11,7 @@ from urllib.parse import urlparse, unquote
 
 from bs4 import BeautifulSoup # Keep bs4 for potential use in sanitization fallback
 from duckduckgo_search import DDGS, exceptions as ddgs_exceptions
-import chardet # <<< ADDED IMPORT
+import chardet
 
 import config as config
 from utils import sanitize_scraped_content # Import the sanitizer
@@ -20,7 +20,7 @@ from utils import sanitize_scraped_content # Import the sanitizer
 logger = logging.getLogger(__name__)
 
 # --- Search Functions ---
-# [ search_duckduckgo_provider and perform_web_search remain unchanged from previous version ]
+
 def search_duckduckgo_provider(keywords: List[str], max_results: int) -> Dict[str, Any]:
     """
     Performs a search on DuckDuckGo using duckduckgo_search with retry logic.
@@ -69,14 +69,15 @@ def search_duckduckgo_provider(keywords: List[str], max_results: int) -> Dict[st
                  logger.info(f"{engine_name} search for '{query}' successful (Attempt {attempt+1}). Found {len(raw_urls)} raw results, yielding {len(urls)} valid URLs.")
                  return {"engine": engine_name, "urls": urls, "success": True, "error": None}
 
-        except ddgs_exceptions.RateLimitException as e:
+        # --- CORRECTED EXCEPTION NAME BELOW ---
+        except ddgs_exceptions.RatelimitException as e: # Changed RateLimitException -> RatelimitException
             error_msg = f"Rate limit hit searching {engine_name} for '{query}' (Attempt {attempt+1}): {e}"
             is_rate_limit = True
             logger.warning(error_msg, exc_info=False)
         except (ddgs_exceptions.DuckDuckGoSearchException, requests.exceptions.RequestException, Exception) as e:
             error_msg = f"Error searching {engine_name} for '{query}' (Attempt {attempt+1}): {type(e).__name__} - {e}"
             error_str_lower = str(e).lower()
-            is_rate_limit = is_rate_limit or "rate limit" in error_str_lower or "429" in error_str_lower or "too many requests" in error_str_lower
+            is_rate_limit = is_rate_limit or "rate limit" in error_str_lower or "429" in error_str_lower or "too many requests" in error_str_lower or "202" in error_str_lower # Check for 202 status which lib uses for rate limit
             logger.warning(error_msg, exc_info=False)
 
         if attempt < max_outer_retries:
@@ -126,9 +127,13 @@ def perform_web_search(keywords: List[str]) -> Tuple[List[str], List[str]]:
                 logger.warning(f"  -> {engine} search failed: {error_msg}")
                 search_errors.append(f"{engine}: {error_msg}")
         except Exception as e:
+            # Catch errors *during* the provider function call itself (like the previous AttributeError)
             engine_name = getattr(provider_func, '__name__', f'Provider_{i+1}')
             logger.error(f"Error executing search provider {engine_name}: {e}", exc_info=True)
-            search_errors.append(f"{engine_name}: Execution Error - {e}")
+            # Format a user-friendly error message
+            error_msg = f"{engine_name}: Execution Error - {type(e).__name__}"
+            search_errors.append(error_msg)
+
 
     final_url_list = sorted(list(all_unique_urls))
     logger.info(f"Web search for keywords '{' '.join(keywords)}' completed. Found {len(final_url_list)} unique URLs. Encountered {len(search_errors)} errors.")
@@ -136,7 +141,7 @@ def perform_web_search(keywords: List[str]) -> Tuple[List[str], List[str]]:
 
 
 # --- Scraping Function ---
-
+# [ scrape_url function remains unchanged from the previous correct version ]
 def scrape_url(url: str) -> Optional[Dict[str, Any]]:
     """
     Scrapes content from a given URL, sanitizes it using Bleach, saves the
@@ -181,16 +186,13 @@ def scrape_url(url: str) -> Optional[Dict[str, Any]]:
             response.close()
             return None
 
-        # Get encoding from headers *before* consuming content.
-        # response.encoding uses headers (like Content-Type charset)
-        encoding_from_headers = response.encoding # Might be None
+        encoding_from_headers = response.encoding
 
-        # --- Stream content download & check size limit ---
         html_content_bytes = b""
         bytes_read = 0
         max_bytes = config.MAX_SCRAPE_CONTENT_BYTES
 
-        for chunk in response.iter_content(chunk_size=8192): # Consume the stream here
+        for chunk in response.iter_content(chunk_size=8192):
             if not chunk: continue
             bytes_read += len(chunk)
             if bytes_read > max_bytes:
@@ -199,7 +201,7 @@ def scrape_url(url: str) -> Optional[Dict[str, Any]]:
                 return None
             html_content_bytes += chunk
 
-        response.close() # Close connection *after* content is read into bytes
+        response.close()
         original_size = bytes_read
         logger.debug(f"Downloaded {original_size / 1024:.1f} KB for {log_url}")
 
@@ -207,18 +209,13 @@ def scrape_url(url: str) -> Optional[Dict[str, Any]]:
              logger.warning(f"Downloaded empty content for {log_url}.")
              return None
 
-        # --- Decode content carefully ---
         html_content_str = ""
         final_encoding_used = None
-
-        # ** FIX: Detect encoding from downloaded bytes if header is unreliable **
         detected_encoding_from_bytes = None
-        # Check header encoding first. Sometimes it's clearly wrong (e.g., iso-8859-1 for utf-8 content)
-        # We could add heuristics here, but for now, let's just use chardet if header is missing.
+
         if not encoding_from_headers:
             try:
                 detection_result = chardet.detect(html_content_bytes)
-                # Use detected encoding only if confidence is reasonably high
                 if detection_result and detection_result['encoding'] and detection_result['confidence'] > 0.7:
                     detected_encoding_from_bytes = detection_result['encoding']
                     logger.debug(f"Encoding not in headers for {log_url}. Detected '{detected_encoding_from_bytes}' with confidence {detection_result['confidence']:.2f}")
@@ -227,15 +224,11 @@ def scrape_url(url: str) -> Optional[Dict[str, Any]]:
             except Exception as chardet_err:
                 logger.warning(f"Chardet detection failed for {log_url}: {chardet_err}")
 
-
-        # Build list of encodings to try: Header > Detected from Bytes > Fallbacks
         encodings_to_try = []
         if encoding_from_headers:
             encodings_to_try.append(encoding_from_headers)
         if detected_encoding_from_bytes and (not encoding_from_headers or detected_encoding_from_bytes.lower() != encoding_from_headers.lower()):
-             # Add detected only if different from header or header was missing
              encodings_to_try.append(detected_encoding_from_bytes)
-        # Add standard fallbacks, ensuring no duplicates (case-insensitive)
         fallbacks = ['utf-8', 'iso-8859-1', 'windows-1252']
         existing_lower = {e.lower() for e in encodings_to_try}
         for fb in fallbacks:
@@ -254,22 +247,19 @@ def scrape_url(url: str) -> Optional[Dict[str, Any]]:
                  logger.debug(f"Decoding attempt failed for {log_url} with encoding '{encoding}': {decode_err}")
         else:
             logger.error(f"Failed to decode content for {log_url} using attempted encodings: {encodings_to_try}")
-            return None # Cannot decode content
+            return None
 
         if not html_content_str.strip():
              logger.warning(f"Decoded content is empty or whitespace for {log_url} (used encoding: {final_encoding_used}).")
              return None
 
-        # --- Sanitize HTML content using Bleach (via utils function) ---
         sanitized_content = sanitize_scraped_content(html_content_str, url=log_url)
         sanitized_size = len(sanitized_content.encode('utf-8'))
 
-        # --- Check if meaningful content remains after sanitization ---
         if not sanitized_content or len(sanitized_content) < config.MIN_SANITIZED_CONTENT_LENGTH:
             logger.debug(f"Content too short ({len(sanitized_content)} chars) or empty after sanitization for {log_url}. Min required: {config.MIN_SANITIZED_CONTENT_LENGTH}. Skipping.")
             return None
 
-        # --- Save *sanitized* text to a temporary file ---
         try:
             fd, temp_filepath = tempfile.mkstemp(
                 suffix=".txt", prefix="sanitized_", dir=config.TEMP_FILE_DIR, text=True
@@ -307,7 +297,6 @@ def scrape_url(url: str) -> Optional[Dict[str, Any]]:
             temp_filepath = None
             return None
 
-    # --- Exception Handling for Request/Scraping Process ---
     except requests.exceptions.Timeout as e:
         logger.warning(f"Timeout error fetching URL {log_url}: {e}")
     except requests.exceptions.HTTPError as e:
@@ -320,15 +309,11 @@ def scrape_url(url: str) -> Optional[Dict[str, Any]]:
     except requests.exceptions.RequestException as e:
         logger.error(f"Request Error fetching URL {log_url}: {type(e).__name__} - {e}", exc_info=False)
     except Exception as e:
-        # Catch-all including the RuntimeError if content consumed elsewhere (shouldn't happen now)
         logger.error(f"Unexpected Error processing URL {log_url}: {type(e).__name__} - {e}", exc_info=True)
 
-    # --- Cleanup in case of error (Response should be closed already) ---
     finally:
-        # Ensure response object is closed if it exists and somehow wasn't closed
-        # Though it should be closed after iter_content or in error handling above
         if response is not None and hasattr(response, 'close') and not getattr(response, '_content_consumed', True):
             try: response.close()
             except Exception: pass
 
-    return None # Return None if any error prevented successful scraping and saving
+    return None
