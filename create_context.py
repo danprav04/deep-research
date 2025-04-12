@@ -16,6 +16,7 @@ DEFAULT_EXCLUDES = [
     ".env",
     "venv/",
     "node_modules/",
+    "deep_research_app/static/js/",
     OUTPUT_FILE # Exclude the output file itself
 ]
 # --- End Configuration ---
