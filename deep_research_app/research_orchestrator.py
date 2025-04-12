@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any, List, Callable, Optional, Tuple, Generator
 from html import escape
 import concurrent.futures
+from urllib.parse import urlparse
 
 import config as config
 from llm_interface import call_gemini, stream_gemini

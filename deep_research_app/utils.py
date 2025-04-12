@@ -12,6 +12,7 @@ from mdit_py_plugins.attrs import attrs_plugin # Allows adding attributes like c
 from mdit_py_plugins.deflist import deflist_plugin # Definition lists
 from mdit_py_plugins.tasklists import tasklists_plugin # Task lists
 import bleach # For sanitizing scraped content *before* LLM
+from html import escape
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)

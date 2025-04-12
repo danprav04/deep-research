@@ -48,7 +48,7 @@ deep-research-tool.online {
              header_up X-Real-IP {remote_host}
              header_up X-Forwarded-For {remote_host}
              header_up X-Forwarded-Proto {scheme}
-             header_up Host {host}
+             header_up Host {Get-host}
 
              # Tweak buffering if needed for SSE (Caddy v2 usually handles this well)
              # flush_interval -1 # Disable response buffering (check Caddy docs)
@@ -110,7 +110,7 @@ dev.deep-research-tool.online {
              header_up X-Real-IP {remote_host}
              header_up X-Forwarded-For {remote_host}
              header_up X-Forwarded-Proto {scheme}
-             header_up Host {host}
+             header_up Host {Get-host}
 
              # Tweak buffering if needed for SSE (Caddy v2 usually handles this well)
              # flush_interval -1 # Disable response buffering (check Caddy docs)
