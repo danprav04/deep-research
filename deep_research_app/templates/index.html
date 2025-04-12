@@ -1,11 +1,20 @@
+
 <!DOCTYPE html>
 <html lang="en" data-theme="light"> <!-- Default theme -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Optional: Add meta description -->
+    <meta name="description" content="Automated research agent using AI to generate reports on any topic.">
+    <!-- Optional: Add keywords -->
+    <meta name="keywords" content="AI research, automated report, Gemini, web scraping, research tool, deep research">
+    <!-- Adsense -->
     <meta name="google-adsense-account" content="ca-pub-5977125521868950">
-    <title>Deep Research Input</title>
+    <title>Deep Research Agent - Input</title>
+    <!-- Pico CSS CDN -->
     <link rel="stylesheet" href="{{ pico_css }}">
+    <!-- Link to custom.css (might not be strictly needed here, but good practice) -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
     <style>
         body {
             padding-top: 2rem;
@@ -29,28 +38,44 @@
         }
         footer {
             margin-top: 3rem;
+            padding: 1rem 0;
             text-align: center;
             font-size: 0.9em;
             color: var(--pico-muted-color);
+            border-top: 1px solid var(--pico-muted-border-color);
         }
-        /* Simple theme toggle */
-        .theme-toggle { margin-top: 1rem; text-align: right; }
+        /* Simple theme toggle positioning */
+        .theme-toggle {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+         }
+        /* Make focus states more visible */
+        *:focus-visible {
+          outline: 2px solid var(--pico-primary-focus);
+          outline-offset: 2px;
+        }
     </style>
 </head>
 <body>
-    <main class="container">
+    <header class="container">
         <div class="theme-toggle">
-            <button id="theme-toggle-btn" data-tooltip="Switch Theme" data-placement="left">🌙</button>
+            <button id="theme-toggle-btn" class="outline secondary" data-tooltip="Switch Theme" data-placement="left" aria-label="Switch Theme">🌙</button>
         </div>
+    </header>
+
+    <main class="container">
+
         <hgroup>
             <h1>Deep Research Agent</h1>
-            <p>Enter a topic to start the automated research process. The agent will generate a plan, search the web, scrape sources, and synthesize a report.</p>
+            <p>Enter a topic to start the automated research process. The agent will generate a plan, search the web, scrape &amp; sanitize sources, and synthesize a report using AI.</p>
         </hgroup>
 
-        <form action="{{ url_for('research_start') }}" method="post">
+        <form id="research-form" action="{{ url_for('research_start') }}" method="post">
             <label for="topic">Research Topic:</label>
-            <input type="text" id="topic" name="topic" placeholder="e.g., The history and impact of the printing press" required aria-describedby="topic-help">
-            <small id="topic-help">Be specific for better results.</small>
+            <input type="text" id="topic" name="topic" placeholder="e.g., The history and impact of the printing press" required aria-describedby="topic-help topic-error" minlength="5" maxlength="300">
+            <small id="topic-help">Enter a clear and specific topic (5-300 characters).</small>
+            <small id="topic-error" role="alert" style="color: var(--pico-color-red); display: none;"></small>
 
             <button type="submit" aria-busy="false">Start Research</button>
         </form>
@@ -58,33 +83,69 @@
     </main>
 
     <footer>
-        Powered by Google Gemini <br>
-        Made by Danprav
+        Powered by Google Gemini &bull; Made by Danprav &bull; <a href="{{ url_for('health_check') }}">Health</a>
     </footer>
 
     <script>
-        // Simple Theme Toggle Logic
-        const themeToggleBtn = document.getElementById('theme-toggle-btn');
-        const currentTheme = localStorage.getItem('theme') || 'light';
-        document.documentElement.setAttribute('data-theme', currentTheme);
-        themeToggleBtn.textContent = currentTheme === 'light' ? '🌙' : '☀️';
+        // Theme Toggle Logic
+        (function() {
+            const themeToggleBtn = document.getElementById('theme-toggle-btn');
+            if (!themeToggleBtn) return;
 
-        themeToggleBtn.addEventListener('click', () => {
-            let newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', newTheme);
-            localStorage.setItem('theme', newTheme);
-            themeToggleBtn.textContent = newTheme === 'light' ? '🌙' : '☀️';
-        });
+            const applyTheme = (theme) => {
+                document.documentElement.setAttribute('data-theme', theme);
+                localStorage.setItem('theme', theme);
+                themeToggleBtn.textContent = theme === 'light' ? '🌙' : '☀️';
+                themeToggleBtn.setAttribute('aria-label', theme === 'light' ? 'Switch to Dark Theme' : 'Switch to Light Theme');
+            };
 
-        // Prevent multiple submissions
-        const form = document.querySelector('form');
-        const submitButton = form.querySelector('button[type="submit"]');
-        form.addEventListener('submit', () => {
-            if (submitButton) {
-                submitButton.setAttribute('aria-busy', 'true');
-                submitButton.disabled = true;
-            }
-        });
+            const currentTheme = localStorage.getItem('theme') || 'light';
+            applyTheme(currentTheme);
+
+            themeToggleBtn.addEventListener('click', () => {
+                let newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                applyTheme(newTheme);
+            });
+        })();
+
+        // Form Submission Handling (Prevent Multiple Submits & Basic Validation)
+        (function() {
+            const form = document.getElementById('research-form');
+            const submitButton = form.querySelector('button[type="submit"]');
+            const topicInput = document.getElementById('topic');
+            const topicError = document.getElementById('topic-error');
+
+            if (!form || !submitButton || !topicInput || !topicError) return;
+
+            form.addEventListener('submit', (event) => {
+                // Basic client-side validation (supplements server-side)
+                const topicValue = topicInput.value.trim();
+                let isValid = true;
+                topicError.textContent = '';
+                topicError.style.display = 'none';
+
+                if (topicValue.length < 5) {
+                    topicError.textContent = 'Topic must be at least 5 characters long.';
+                    isValid = false;
+                } else if (topicValue.length > 300) {
+                    topicError.textContent = 'Topic must be 300 characters or less.';
+                    isValid = false;
+                }
+                // Add more checks if needed (e.g., disallowed characters)
+
+                if (!isValid) {
+                    event.preventDefault(); // Stop form submission
+                    topicError.style.display = 'block';
+                    topicInput.focus();
+                } else {
+                    // Disable button and show busy state if valid
+                    submitButton.setAttribute('aria-busy', 'true');
+                    submitButton.disabled = true;
+                    topicError.style.display = 'none';
+                    // Allow form submission to proceed
+                }
+            });
+        })();
     </script>
 
 </body>

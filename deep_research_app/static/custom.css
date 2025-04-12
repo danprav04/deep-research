@@ -1,14 +1,13 @@
+
 /* custom.css - Enhanced styling for the research report */
 
 /* --- Base & Font Setup --- */
 :root {
-    /* Define base font size and line height for calculations */
+    /* Base font size and line height */
     --pico-font-size: 112.5%; /* Slightly larger base font size (18px if base is 16px) */
     --pico-line-height: 1.7;  /* Generous line height for readability */
-    /* Keep Pico's default font stack, it's good */
-    /* --pico-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif; */
 
-    /* Custom Properties (optional) */
+    /* Custom Properties */
     --report-max-width: 900px;
     --code-background-color: #f4f4f8; /* Lighter code background */
     --code-text-color: #333;
@@ -16,20 +15,28 @@
     --blockquote-background-color: #f9f9f9;
     --tooltip-background: #333;
     --tooltip-text-color: #fff;
+    --progress-list-background: #f8f9fa; /* Light grey for progress */
+    --progress-error-color: var(--pico-color-red, #d32f2f);
+    --progress-error-border: var(--pico-color-red, #d32f2f);
+    --progress-fatal-background: rgba(211, 47, 47, 0.1); /* Faint red background */
 }
 
 html[data-theme='dark'] {
     --code-background-color: #2d3748; /* Darker code background */
     --code-text-color: #e2e8f0;
+    --blockquote-border-color: var(--pico-primary-focus);
     --blockquote-background-color: #2a303c;
     --tooltip-background: #eee;
     --tooltip-text-color: #333;
+    --progress-list-background: #252a33;
+    --progress-error-color: var(--pico-color-red-light, #f44336);
+    --progress-error-border: var(--pico-color-red-light, #f44336);
+    --progress-fatal-background: rgba(244, 67, 54, 0.15);
 }
 
 
 body {
     padding-bottom: 5rem;
-    /* font-family: var(--pico-font-family); Inherited */
     font-size: var(--pico-font-size);
     line-height: var(--pico-line-height);
     color: var(--pico-color);
@@ -50,11 +57,11 @@ main.container {
     border: 1px solid var(--pico-card-border-color);
     border-radius: var(--pico-border-radius);
     background-color: var(--pico-card-background-color);
-    box-shadow: var(--pico-box-shadow); /* Use consistent shadow */
+    box-shadow: var(--pico-box-shadow);
 }
 
-/* --- Report Content Styling (#report-display) --- */
-#report-display {
+/* --- Report Content Styling (#report-display article) --- */
+#report-display article {
     /* Basic text wrapping */
     overflow-wrap: break-word;
     word-wrap: break-word; /* Legacy fallback */
@@ -63,24 +70,24 @@ main.container {
 }
 
 /* Ensure block elements allow wrapping */
-#report-display p,
-#report-display li,
-#report-display h1,
-#report-display h2,
-#report-display h3,
-#report-display blockquote {
-    overflow-wrap: break-word; /* Redundant? Maybe not for all browsers */
+#report-display article p,
+#report-display article li,
+#report-display article h1,
+#report-display article h2,
+#report-display article h3,
+#report-display article blockquote {
+    overflow-wrap: break-word;
     word-wrap: break-word;
     word-break: break-word; /* Ensure headings etc. can break */
 }
 
 /* --- Headings within the Report --- */
-#report-display h1,
-#report-display h2,
-#report-display h3,
-#report-display h4, /* Style H4-H6 just in case */
-#report-display h5,
-#report-display h6 {
+#report-display article h1,
+#report-display article h2,
+#report-display article h3,
+#report-display article h4,
+#report-display article h5,
+#report-display article h6 {
     font-family: inherit; /* Ensure consistency */
     font-weight: 700; /* Bold headings */
     line-height: 1.3; /* Tighter line height for headings */
@@ -88,7 +95,7 @@ main.container {
     color: var(--pico-h1-color); /* Use H1 color for all report headings for emphasis */
 }
 
-#report-display h1 {
+#report-display article h1 {
     font-size: clamp(1.8rem, 5vw, 2.4rem); /* Responsive font size */
     margin-top: 0; /* No top margin for first heading */
     margin-bottom: 1.8rem; /* More space after main title */
@@ -96,14 +103,14 @@ main.container {
     border-bottom: 2px solid var(--pico-primary);
 }
 
-#report-display h2 {
+#report-display article h2 {
     font-size: clamp(1.5rem, 4vw, 1.8rem); /* Responsive font size */
     margin-top: 2.5rem; /* More space before H2 */
     padding-bottom: 0.4rem;
     border-bottom: 1px solid var(--pico-muted-border-color);
 }
 
-#report-display h3 {
+#report-display article h3 {
     font-size: clamp(1.2rem, 3.5vw, 1.4rem); /* Responsive font size */
     margin-top: 2rem; /* More space before H3 */
     font-weight: 600; /* Slightly less bold than H1/H2 */
@@ -111,33 +118,43 @@ main.container {
 }
 
 /* Paragraph styling */
-#report-display p {
+#report-display article p {
     margin-bottom: 1.3rem; /* Slightly more space after paragraphs */
     max-width: 75ch; /* Limit paragraph width for readability */
 }
 
 /* List styling */
-#report-display ul,
-#report-display ol {
+#report-display article ul,
+#report-display article ol {
     margin-left: 1.5rem; /* Standard indent */
     margin-bottom: 1.3rem;
     padding-left: 1.5rem; /* Ensure padding for bullets/numbers */
 }
-#report-display ul { list-style: disc; }
-#report-display ol { list-style: decimal; } /* Ensure numbered lists use decimal */
+#report-display article ul { list-style: disc; }
+#report-display article ol { list-style: decimal; } /* Ensure numbered lists use decimal */
+#report-display article dl { margin-bottom: 1.3rem; } /* Definition list */
 
-#report-display li {
-    margin-bottom: 0.6rem; /* Space between list items */
+#report-display article li,
+#report-display article dt, /* Definition term */
+#report-display article dd { /* Definition description */
+    margin-bottom: 0.6rem; /* Space between items */
+}
+#report-display article dt { font-weight: bold; }
+#report-display article dd { margin-left: 1.5rem; } /* Indent description */
+
+#report-display article li {
     padding-left: 0.5rem; /* Slight indent for item content */
 }
-#report-display li p { /* Paragraphs inside list items */
+
+#report-display article li p,
+#report-display article dd p { /* Paragraphs inside list/definition items */
     margin-bottom: 0.5rem;
     max-width: calc(75ch - 2rem); /* Adjust max-width for indentation */
 }
 
 
 /* Blockquote styling */
-#report-display blockquote {
+#report-display article blockquote {
     margin-left: 1rem;
     margin-right: 1rem;
     margin-bottom: 1.3rem;
@@ -148,18 +165,18 @@ main.container {
     font-style: italic;
     border-radius: var(--pico-border-radius);
 }
-#report-display blockquote p {
+#report-display article blockquote p {
     margin-bottom: 0.5rem;
     font-style: normal; /* Reset italic for paragraphs inside */
     max-width: none; /* Allow blockquote text to fill width */
 }
-#report-display blockquote p:last-child {
+#report-display article blockquote p:last-child {
     margin-bottom: 0;
 }
 
 
 /* Code block styling */
-#report-display pre {
+#report-display article pre {
     margin-bottom: 1.3rem;
     padding: 1rem;
     white-space: pre-wrap; /* Wrap long lines */
@@ -169,47 +186,67 @@ main.container {
     color: var(--code-text-color);
     border-radius: var(--pico-border-radius);
     border: 1px solid var(--pico-muted-border-color);
+    font-family: var(--pico-code-font-family, monospace);
     font-size: 0.9em; /* Slightly smaller for code */
     line-height: 1.5;
     overflow-x: auto; /* Add horizontal scroll if needed, though wrapping is preferred */
 }
 /* Inline code */
-#report-display code:not(pre code) {
+#report-display article code:not(pre code) {
     background-color: var(--code-background-color);
     color: var(--code-text-color);
     padding: 0.2em 0.4em;
     border-radius: 3px;
+    font-family: var(--pico-code-font-family, monospace);
     font-size: 0.9em;
     white-space: normal; /* Allow inline code to wrap */
-    /* white-space: nowrap; */ /* Use this if you NEVER want inline code to wrap */
 }
 
 
 /* Table styling */
-#report-display table {
+#report-display article table {
     margin-bottom: 1.5rem;
     width: 100%; /* Make table take full width */
     border-collapse: collapse; /* Cleaner borders */
+    border: 1px solid var(--pico-muted-border-color); /* Outer border */
 }
-#report-display th, #report-display td {
+#report-display article th,
+#report-display article td {
     padding: 0.8rem 1rem; /* More padding in cells */
-    border: 1px solid var(--pico-muted-border-color); /* Add cell borders */
-}
-#report-display th {
-    background-color: var(--pico-table-header-background);
-    font-weight: bold;
+    border: 1px solid var(--pico-muted-border-color); /* Cell borders */
     text-align: left;
+}
+#report-display article th {
+    background-color: var(--pico-table-header-background, var(--pico-muted-background-color)); /* Fallback */
+    font-weight: bold;
+    color: var(--pico-table-header-color, inherit);
 }
 
 /* Horizontal Rule */
-#report-display hr {
+#report-display article hr {
     margin: 2.5rem 0; /* More vertical space around HR */
     border: none; /* Remove default border */
     border-top: 1px solid var(--pico-muted-border-color);
 }
 
+/* Task lists */
+#report-display article ul.task-list {
+    list-style: none;
+    padding-left: 0.5rem;
+}
+#report-display article li.task-list-item {
+    display: flex;
+    align-items: baseline;
+}
+#report-display article input[type="checkbox"].task-list-item-checkbox {
+    margin-right: 0.5em;
+    margin-top: 0.2em; /* Adjust vertical alignment */
+    flex-shrink: 0; /* Prevent checkbox from shrinking */
+}
+
+
 /* --- Citation Styling & Interactivity (Using Pico Tooltips) --- */
-#report-display sup a[href^="#fn:"] {
+#report-display article sup a[href^="#fn:"] {
     display: inline-block; /* Needed for padding etc. */
     padding: 0.1em 0.4em;
     margin: 0 0.1em;
@@ -226,8 +263,8 @@ main.container {
     border: 1px solid transparent; /* Add transparent border for focus */
 }
 
-#report-display sup a[href^="#fn:"]:hover,
-#report-display sup a[href^="#fn:"]:focus {
+#report-display article sup a[href^="#fn:"]:hover,
+#report-display article sup a[href^="#fn:"]:focus {
     background-color: var(--pico-primary-focus);
     color: var(--pico-primary-inverse);
     outline: none;
@@ -244,13 +281,12 @@ main.container {
   white-space: normal; /* Allow tooltips to wrap */
   max-width: 300px; /* Limit tooltip width */
   line-height: 1.5;
-  /* Add pointer */
-  /* content: attr(data-tooltip) "뾰"; */
+  z-index: 10; /* Ensure tooltip is above other content */
 }
 
 
 /* --- Bibliography Styling --- */
-#report-display .footnotes {
+#report-display article section.footnotes {
     margin-top: 3.5rem; /* More space before bibliography */
     padding-top: 1.5rem;
     border-top: 2px solid var(--pico-primary-border);
@@ -258,42 +294,44 @@ main.container {
     color: var(--pico-muted-color);
 }
 
-#report-display .footnotes hr { display: none; } /* Hide the default hr in footnotes section */
+#report-display article section.footnotes hr { display: none; } /* Hide the default hr in footnotes section */
 
 /* Style the ordered list itself */
-#report-display .footnotes ol {
+#report-display article section.footnotes ol {
     padding-left: 2.5em; /* Ensure enough space for numbers */
     list-style: decimal; /* Explicitly set decimal numbering */
     margin-left: 0; /* Reset default margin */
 }
 
 /* Style individual bibliography items */
-#report-display .footnotes li {
+#report-display article section.footnotes li {
     margin-bottom: 0.8rem;
     padding-left: 0; /* Remove previous padding, rely on <ol> padding */
     line-height: 1.6; /* Better line height for potentially long URLs */
     overflow-wrap: break-word; /* Break long text/URLs */
     word-wrap: break-word;
-    /* word-break: break-all; */ /* Avoid break-all unless absolutely necessary */
+    word-break: break-word; /* Ensure long URLs can break */
 }
-
-/* --- Removed ::before rule that added [N] --- */
-/* #report-display .footnotes li::before { ... } */
 
 /* Style links within bibliography items */
-#report-display .footnotes li a:not(.footnote-backref) { /* Target only the URL links we add */
+#report-display article section.footnotes li a:not(.footnote-backref) { /* Target only the URL links added by JS */
     color: var(--pico-primary);
     text-decoration: none;
-    word-break: break-all; /* Allow breaking long URLs */
+    word-break: break-all; /* Allow breaking long URLs aggressively if needed */
 }
-#report-display .footnotes li a:not(.footnote-backref):hover,
-#report-display .footnotes li a:not(.footnote-backref):focus {
+#report-display article section.footnotes li a:not(.footnote-backref):hover,
+#report-display article section.footnotes li a:not(.footnote-backref):focus {
     text-decoration: underline;
     outline: none;
 }
 
+/* Style the footnote ID target */
+#report-display article li[id^="fn:"] {
+    scroll-margin-top: 2rem; /* Add space when jumping to footnote */
+}
+
 /* Style the backlink (↩) - Keep original styling */
-#report-display .footnotes li a.footnote-backref {
+#report-display article section.footnotes li a.footnote-backref {
     display: inline-block;
     margin-left: 0.6em;
     text-decoration: none;
@@ -304,8 +342,8 @@ main.container {
     border-radius: 3px;
     transition: background-color 0.2s ease, color 0.2s ease;
 }
-#report-display .footnotes li a.footnote-backref:hover,
-#report-display .footnotes li a.footnote-backref:focus {
+#report-display article section.footnotes li a.footnote-backref:hover,
+#report-display article section.footnotes li a.footnote-backref:focus {
     text-decoration: none;
     background-color: var(--pico-secondary-background);
     color: var(--pico-secondary-hover);
@@ -322,7 +360,7 @@ main.container {
 
 #synthesis-output, #report-output {
     min-height: 100px; /* Slightly larger min-height */
-    max-height: 400px; /* Limit max height */
+    max-height: 350px; /* Limit max height to save screen space */
     overflow-y: auto;  /* Enable scrolling */
     padding: 1rem;
     border: 1px dashed var(--pico-muted-border-color);
@@ -359,7 +397,7 @@ main.container {
 #progress-list {
     max-height: 350px;
     overflow-y: auto;
-    background-color: var(--pico-card-background-color); /* Match card background */
+    background-color: var(--progress-list-background); /* Custom background */
     padding: 15px;
     border-radius: var(--pico-border-radius);
     border: 1px solid var(--pico-muted-border-color);
@@ -379,15 +417,15 @@ main.container {
 }
 /* Add icons or adjust border color for different types */
 #progress-list li.error {
-    color: var(--pico-color-red);
+    color: var(--progress-error-color);
     font-weight: 600;
-    border-left-color: var(--pico-color-red);
+    border-left-color: var(--progress-error-border);
 }
 #progress-list li.fatal-error {
-    color: var(--pico-color-red);
+    color: var(--progress-error-color);
     font-weight: 700;
-    border-left-color: var(--pico-color-red);
-    background-color: rgba(214, 69, 65, 0.1); /* Faint red background */
+    border-left-color: var(--progress-error-border);
+    background-color: var(--progress-fatal-background); /* Faint red background */
 }
 #progress-list li:last-child {
     margin-bottom: 0;
@@ -414,19 +452,19 @@ main.container {
     :root { --pico-font-size: 106.25%; } /* ~17px base on mobile */
     main.container { padding-left: 0.5rem; padding-right: 0.5rem; }
     #final-report-display { padding: 1.5rem 1rem; }
-    #report-display h1 { font-size: 1.9rem; }
-    #report-display h2 { font-size: 1.6rem; }
-    #report-display h3 { font-size: 1.3rem; }
-    #report-display p { max-width: none; } /* Remove char limit on mobile */
-    #report-display blockquote { margin-left: 0.5rem; margin-right: 0.5rem; }
+    #report-display article h1 { font-size: 1.9rem; }
+    #report-display article h2 { font-size: 1.6rem; }
+    #report-display article h3 { font-size: 1.3rem; }
+    #report-display article p { max-width: none; } /* Remove char limit on mobile */
+    #report-display article blockquote { margin-left: 0.5rem; margin-right: 0.5rem; }
     /* Adjust footnote list padding on smaller screens */
-    #report-display .footnotes ol { padding-left: 2em; }
+    #report-display article section.footnotes ol { padding-left: 2em; }
 }
 
 @media (max-width: 480px) {
     :root { --pico-font-size: 100%; } /* 16px base on small mobile */
     #final-report-display { padding: 1rem 0.8rem; }
-    #report-display h1 { font-size: 1.7rem; }
-    #report-display h2 { font-size: 1.4rem; }
-    #report-display h3 { font-size: 1.2rem; }
+    #report-display article h1 { font-size: 1.7rem; }
+    #report-display article h2 { font-size: 1.4rem; }
+    #report-display article h3 { font-size: 1.2rem; }
 }

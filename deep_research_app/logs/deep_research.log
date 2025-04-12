@@ -1,0 +1,6 @@
+2025-04-12 16:51:02,496 - INFO - [root:73] Logging configured. Level: INFO, File: ./logs/deep_research.log, Rotation: 7 days.
+2025-04-12 16:51:02,498 - INFO - [__main__:86] Rate limiting configured with default: 15 per minute
+2025-04-12 16:51:02,498 - INFO - [__main__:99] Google Generative AI configured with model: gemini-2.0-flash
+2025-04-12 16:53:00,911 - INFO - [root:73] Logging configured. Level: INFO, File: ./logs/deep_research.log, Rotation: 7 days.
+2025-04-12 16:53:00,912 - INFO - [__main__:86] Rate limiting configured with default: 15 per minute
+2025-04-12 16:53:00,912 - INFO - [__main__:99] Google Generative AI configured with model: gemini-2.0-flash
