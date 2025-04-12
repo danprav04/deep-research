@@ -1,5 +1,5 @@
-deep-research.mooo.com {
-    # Optional: Enable better logging (logs to systemd journal by defau>
+deep-research-tool.online {
+    # Optional: Enable better logging (logs to systemd journal by default)
     log {
         output stderr
         format console
@@ -10,8 +10,8 @@ deep-research.mooo.com {
 
     # Recommended: Add useful security headers
     header {
-        # Enable HTTP Strict Transport Security (HSTS) - Tells browsers>
-        # Be sure HTTPS is working reliably before uncommenting the ful>
+        # Enable HTTP Strict Transport Security (HSTS) - Tells browsers
+        # Be sure HTTPS is working reliably before uncommenting the full
         # Start with a short max-age for testing if unsure.
         # Strict-Transport-Security "max-age=31536000;" always
         X-Frame-Options "SAMEORIGIN" always
@@ -21,8 +21,12 @@ deep-research.mooo.com {
         -Server
     }
 
-    # The essential part: Reverse proxy to your Gunicorn app running on>
+    # The essential part: Reverse proxy to your Gunicorn app running on port 8000
     reverse_proxy localhost:8000
+}
+
+www.deep-research-tool.online {
+    redir https://deep-research-tool.online{uri} permanent
 }
 
 macros-counter.mooo.com {
@@ -46,10 +50,6 @@ macros-counter.mooo.com {
     # Reverse proxy to the macros-counter app on port 4000
     reverse_proxy localhost:4000
 }
-
- www.deep-research.mooo.com {
-    redir https://deep-research.mooo.com{uri} permanent
- }
 
  www.macros-counter.mooo.com {
     redir https://macros-counter.mooo.com{uri} permanent
