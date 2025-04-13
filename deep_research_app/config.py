@@ -1,3 +1,4 @@
+# --- File: deep_research_app/config.py ---
 # config.py
 import os
 import sys # Import sys for stderr
@@ -34,41 +35,44 @@ _DEFAULT_LOG_FILE = os.path.abspath(os.path.join(_DEFAULT_LOG_DIR, 'deep_researc
 LOG_FILE_PATH = os.path.abspath(os.getenv("LOG_FILE_PATH", _DEFAULT_LOG_FILE))
 LOG_ROTATION_DAYS = int(os.getenv("LOG_ROTATION_DAYS", 14)) # Keep logs for 2 weeks
 
-# --- Rate Limiting ---
+# --- Rate Limiting (Flask Limiter) ---
 # This limit applies ONLY to routes explicitly decorated with @limiter.limit(DEFAULT_RATE_LIMIT)
 # Ensure DEFAULT_RATE_LIMIT env var is unset or matches this if overriding.
-DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "1 per minute")
+DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "10 per minute") # User's previous value
 
 # --- Search Configuration ---
 # Sensible defaults for production, adjustable via environment variables
 MAX_SEARCH_RESULTS_PER_ENGINE_STEP: int = int(os.getenv("MAX_SEARCH_RESULTS_PER_ENGINE_STEP", 5))
-MAX_TOTAL_URLS_TO_SCRAPE: int = int(os.getenv("MAX_TOTAL_URLS_TO_SCRAPE", 20)) # Reduced slightly from user value
+MAX_TOTAL_URLS_TO_SCRAPE: int = int(os.getenv("MAX_TOTAL_URLS_TO_SCRAPE", 20))
 MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", 3)) # Adjust based on server CPU/RAM
 REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", 15)) # Slightly shorter timeout
 USER_AGENT: str = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")
 
 # Production-safe search delays - adjust via env vars if needed
-# Very low values (like 0.5s/1s) risk frequent external rate limits from DDG
-DDGS_RETRY_DELAY_SECONDS: float = float(os.getenv("DDGS_RETRY_DELAY_SECONDS", 5.0)) # More robust retry delay
-INTER_SEARCH_DELAY_SECONDS: float = float(os.getenv("INTER_SEARCH_DELAY_SECONDS", 8.0)) # More robust delay between steps
+DDGS_RETRY_DELAY_SECONDS: float = float(os.getenv("DDGS_RETRY_DELAY_SECONDS", 5.0))
+INTER_SEARCH_DELAY_SECONDS: float = float(os.getenv("INTER_SEARCH_DELAY_SECONDS", 8.0))
 
 # --- Content Processing ---
-# User's higher token limit - ensure sufficient RAM and LLM support
 TARGET_MAX_CONTEXT_TOKENS: int = int(os.getenv("TARGET_MAX_CONTEXT_TOKENS", 700000))
 CHARS_PER_TOKEN_ESTIMATE: float = 4.0 # General estimate
 MAX_CONTEXT_CHARS_SAFETY_MARGIN: float = 0.9 # Use 90% of estimated char limit
 MAX_CONTEXT_CHARS: int = int(TARGET_MAX_CONTEXT_TOKENS * CHARS_PER_TOKEN_ESTIMATE * MAX_CONTEXT_CHARS_SAFETY_MARGIN)
 
-MIN_MEANINGFUL_WORDS_PER_PAGE: int = int(os.getenv("MIN_MEANINGFUL_WORDS_PER_PAGE", 50)) # Increased slightly
+MIN_MEANINGFUL_WORDS_PER_PAGE: int = int(os.getenv("MIN_MEANINGFUL_WORDS_PER_PAGE", 50))
 MAX_SCRAPE_CONTENT_LENGTH_MB: int = int(os.getenv("MAX_SCRAPE_CONTENT_LENGTH_MB", 2))
 MAX_SCRAPE_CONTENT_BYTES: int = MAX_SCRAPE_CONTENT_LENGTH_MB * 1024 * 1024
-MIN_SANITIZED_CONTENT_LENGTH: int = int(os.getenv("MIN_SANITIZED_CONTENT_LENGTH", 200)) # Increased slightly
+MIN_SANITIZED_CONTENT_LENGTH: int = int(os.getenv("MIN_SANITIZED_CONTENT_LENGTH", 200))
 
 # --- LLM Configuration ---
-LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", 0.5)) # Slightly lower temp for more deterministic reports
-LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", 2)) # Fewer retries by default
-LLM_RETRY_DELAY: int = int(os.getenv("LLM_RETRY_DELAY", 7)) # Slightly longer retry delay
+LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", 0.5))
+LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", 2)) # Max retries for *non*-rate-limit errors
+LLM_RETRY_DELAY: int = int(os.getenv("LLM_RETRY_DELAY", 7)) # Base delay for *non*-rate-limit errors
 
+# Rate Limit Specific Retries (NEW)
+LLM_RATE_LIMIT_RETRY_DELAY: int = int(os.getenv("LLM_RATE_LIMIT_RETRY_DELAY", 20)) # Longer delay for rate limit (seconds)
+LLM_MAX_RATE_LIMIT_RETRIES: int = int(os.getenv("LLM_MAX_RATE_LIMIT_RETRIES", 15)) # Max retries for rate limit errors (~5 mins total wait if delay is 20s)
+
+# Safety Settings
 BLOCK_LEVEL = os.getenv("GOOGLE_SAFETY_BLOCK_LEVEL", "BLOCK_MEDIUM_AND_ABOVE")
 _VALID_BLOCK_LEVELS = ["BLOCK_NONE", "BLOCK_ONLY_HIGH", "BLOCK_MEDIUM_AND_ABOVE", "BLOCK_LOW_AND_ABOVE"]
 if BLOCK_LEVEL not in _VALID_BLOCK_LEVELS:
@@ -88,17 +92,15 @@ _TEMP_FILE_DIR_NAME = "temp_scrape_files"
 TEMP_FILE_DIR = os.path.abspath(os.path.join(_PROJECT_ROOT, _TEMP_FILE_DIR_NAME))
 
 # Create TEMP_FILE_DIR if it doesn't exist during config loading
-# Handles potential permission issues during startup
 if not os.path.exists(TEMP_FILE_DIR):
     try:
-        os.makedirs(TEMP_FILE_DIR, exist_ok=True) # Use exist_ok=True
+        os.makedirs(TEMP_FILE_DIR, exist_ok=True)
         print(f"INFO: Ensured temporary directory exists: {TEMP_FILE_DIR}")
-        # Check writability after ensuring existence
         if not os.access(TEMP_FILE_DIR, os.W_OK):
              raise OSError(f"Temporary directory '{TEMP_FILE_DIR}' exists but is not writable.")
     except OSError as e:
         print(f"ERROR: Could not create or access temporary directory {TEMP_FILE_DIR}: {e}. Scraping will likely fail.", file=sys.stderr)
-    except Exception as e: # Catch other potential errors like permission issues
+    except Exception as e:
         print(f"ERROR: Unexpected error setting up temporary directory {TEMP_FILE_DIR}: {e}. Scraping will likely fail.", file=sys.stderr)
 
 
@@ -107,7 +109,6 @@ PICO_CSS_CDN: str = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.c
 
 
 # --- Validation ---
-# Ensure critical secrets/configs are loaded
 _validation_errors = []
 if not GOOGLE_API_KEY:
     _validation_errors.append("GOOGLE_API_KEY environment variable not set.")
@@ -138,6 +139,9 @@ print(f"Target Max Context Tokens (LLM): {TARGET_MAX_CONTEXT_TOKENS:,}")
 print(f"Calculated Max Context Chars (LLM): {MAX_CONTEXT_CHARS:,}")
 print(f"Max Scrape Size (MB): {MAX_SCRAPE_CONTENT_LENGTH_MB}")
 print(f"LLM Safety Level: {BLOCK_LEVEL}")
+print(f"LLM General Max Retries: {LLM_MAX_RETRIES}")
+print(f"LLM Rate Limit Max Retries: {LLM_MAX_RATE_LIMIT_RETRIES}") # New
+print(f"LLM Rate Limit Retry Delay: {LLM_RATE_LIMIT_RETRY_DELAY}s") # New
 print(f"Rate Limit (Decorated Routes): {DEFAULT_RATE_LIMIT} per IP")
 print(f"DDGS Retry Delay Base: {DDGS_RETRY_DELAY_SECONDS}s")
 print(f"Inter-Search Step Delay: {INTER_SEARCH_DELAY_SECONDS}s")
