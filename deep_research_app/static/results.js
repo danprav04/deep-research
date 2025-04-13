@@ -1,3 +1,5 @@
+// deep_research_app/static/results.js
+
 // results.js - Frontend logic for the research results page
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -11,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const reportOutput = document.getElementById('report-output');
     const finalReportDisplay = document.getElementById('final-report-display');
     const reportDisplayDiv = document.getElementById('report-display'); // The div to inject final HTML into
+    const copyReportBtn = document.getElementById('copy-report-btn'); // The new copy button
 
     // --- State ---
     let eventSource = null;
@@ -270,11 +273,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         console.error("DOMPurify sanitization resulted in empty content.");
                         finalHtml = "<article><h2>Error</h2><p><em>Report content could not be displayed securely after sanitization.</em></p></article>";
                         addProgress("Client Error: Report content blocked by security filter after sanitization.", true);
+                        // Disable copy button if report is invalid
+                        if (copyReportBtn) {
+                            copyReportBtn.classList.add('hidden');
+                        }
+                    } else {
+                         // Report seems valid, show copy button
+                         if (copyReportBtn) {
+                             copyReportBtn.classList.remove('hidden');
+                         }
                     }
 
                 } else {
                      console.warn("Received empty or invalid report HTML content from server.");
                      // Keep the default error message defined above
+                     // Hide copy button if report is invalid/empty
+                     if (copyReportBtn) {
+                        copyReportBtn.classList.add('hidden');
+                     }
                 }
 
                 console.log("Setting innerHTML for report-display...");
@@ -294,10 +310,18 @@ document.addEventListener('DOMContentLoaded', () => {
                  console.error("Error processing or displaying final report:", e);
                  addProgress(`Client Error displaying final report: ${e.message}`, true);
                  reportDisplayDiv.innerHTML = "<article><h2>Error</h2><p><em>An error occurred on the client while rendering the report. Please check the console.</em></p></article>";
+                 // Hide copy button on error
+                 if (copyReportBtn) {
+                     copyReportBtn.classList.add('hidden');
+                 }
             }
         } else {
             console.error("Final report display area ('report-display' div) not found.");
             addProgress("Client Error: Cannot find the area to display the final report.", true);
+            // Hide copy button if display area missing
+            if (copyReportBtn) {
+                copyReportBtn.classList.add('hidden');
+            }
         }
     }
 
@@ -330,15 +354,73 @@ document.addEventListener('DOMContentLoaded', () => {
         if (finalReportDisplay && finalReportDisplay.classList.contains('hidden')) {
             addProgress("Process stopped or terminated before final report was generated. Check logs for details.", true, false); // Mark as error but not necessarily fatal to the whole page
              // Show an error message in the report area if it's empty and doesn't already show an error
-            if (reportDisplayDiv && !reportDisplayDiv.innerHTML.includes("<h2>Error</h2>")) {
+            if (reportDisplayDiv && !reportDisplayDiv.innerHTML.includes("<h2>Error</h2>") && !reportDisplayDiv.innerHTML.includes("<h2>Process Interrupted</h2>")) {
                 reportDisplayDiv.innerHTML = "<article><h2>Process Interrupted</h2><p><em>Report generation did not complete successfully. The process may have been interrupted or encountered an error before finishing.</em></p></article>";
                 finalReportDisplay.classList.remove('hidden'); // Show the error area
                 hideStreamOutputs(); // Ensure stream areas are hidden
             }
+            // Ensure copy button is hidden if process didn't complete
+            if (copyReportBtn) copyReportBtn.classList.add('hidden');
         } else {
              addProgress("Process finished."); // Add a final confirmation if report was shown
+             // Ensure copy button is shown if process completed successfully
+             if (copyReportBtn && reportDisplayDiv && !reportDisplayDiv.innerHTML.includes("<h2>Error</h2>") && !reportDisplayDiv.innerHTML.includes("<h2>Process Interrupted</h2>") ) {
+                 copyReportBtn.classList.remove('hidden');
+             }
         }
     }
+
+     // Handle Copy Button Click
+     function handleCopyClick() {
+        if (!reportDisplayDiv) {
+            console.error("Cannot copy: Report display div not found.");
+            addProgress("Error: Could not find report content to copy.", true);
+            return;
+        }
+
+        // Get the text content of the rendered report
+        const reportText = reportDisplayDiv.innerText || reportDisplayDiv.textContent || "";
+
+        if (!reportText.trim()) {
+            console.warn("Attempted to copy empty report content.");
+            addProgress("Warning: Report content is empty, nothing to copy.", true);
+            return;
+        }
+
+        navigator.clipboard.writeText(reportText).then(() => {
+            // Success feedback
+            console.log("Report text copied to clipboard.");
+            const originalButtonText = copyReportBtn.innerHTML; // Store original SVG + Text
+            copyReportBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-check-lg" viewBox="0 0 16 16" style="vertical-align: text-bottom; margin-right: 0.3em;">
+                  <path d="M12.736 3.97a.733.733 0 0 1 1.047 0c.286.289.29.756.01 1.05L7.88 12.01a.733.733 0 0 1-1.065.02L3.217 8.384a.757.757 0 0 1 0-1.06.733.733 0 0 1 1.047 0l3.052 3.093 5.4-6.425z"/>
+                </svg>
+                Copied!`;
+            copyReportBtn.disabled = true;
+
+            // Reset button after a short delay
+            setTimeout(() => {
+                copyReportBtn.innerHTML = originalButtonText;
+                copyReportBtn.disabled = false;
+            }, 2000); // Reset after 2 seconds
+
+        }).catch(err => {
+            // Error feedback
+            console.error("Failed to copy report text: ", err);
+            addProgress("Error: Could not copy report to clipboard. Check browser permissions.", true);
+             const originalButtonText = copyReportBtn.innerHTML;
+             copyReportBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-x-octagon" viewBox="0 0 16 16" style="vertical-align: text-bottom; margin-right: 0.3em;">
+                  <path d="M4.54.146A.5.5 0 0 1 4.893 0h6.214a.5.5 0 0 1 .353.146l4.394 4.394a.5.5 0 0 1 .146.353v6.214a.5.5 0 0 1-.146.353l-4.394 4.394a.5.5 0 0 1-.353.146H4.893a.5.5 0 0 1-.353-.146L.146 11.46A.5.5 0 0 1 0 11.107V4.893a.5.5 0 0 1 .146-.353zM5.1 1 1 5.1v5.8L5.1 15h5.8l4.1-4.1V5.1L10.9 1z"/>
+                  <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>
+                </svg>
+                Copy Failed`;
+             setTimeout(() => {
+                 copyReportBtn.innerHTML = originalButtonText;
+             }, 3000); // Reset after 3 seconds
+        });
+    }
+
 
     // Establish the Server-Sent Events connection
     function connectSSE() {
@@ -348,6 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!encodedTopic) {
             addProgress("Client Error: Cannot connect to stream. Topic parameter is missing.", true, true);
             if (loader) loader.classList.add('hidden');
+             if (copyReportBtn) copyReportBtn.classList.add('hidden'); // Hide copy button
             return;
         }
 
@@ -362,6 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
              console.error("Failed to create EventSource:", e);
              addProgress(`Client Error: Failed to initialize connection to ${streamUrl}. Check browser compatibility or network settings.`, true, true);
              if (loader) loader.classList.add('hidden');
+              if (copyReportBtn) copyReportBtn.classList.add('hidden'); // Hide copy button
              return;
         }
 
@@ -372,6 +456,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addProgress("Connection established. Starting research process...");
             clearStreamOutputs(); // Show and clear streaming areas
             if (finalReportDisplay) finalReportDisplay.classList.add('hidden'); // Hide final report area initially
+             if (copyReportBtn) copyReportBtn.classList.add('hidden'); // Hide copy button initially
             if (reportDisplayDiv) reportDisplayDiv.innerHTML = '<article><p><em>Loading final report...</em></p></article>'; // Placeholder
             if (loader) loader.classList.remove('hidden'); // Show loader
         };
@@ -391,6 +476,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (isFatal) {
                             addProgress("Research stopped due to fatal server error.", true, true);
                             if (loader) loader.classList.add('hidden');
+                             if (copyReportBtn) copyReportBtn.classList.add('hidden'); // Hide copy button on fatal error
                             if (eventSource) eventSource.close();
                             // Display fatal error in the report area if it's still hidden
                             if (reportDisplayDiv && finalReportDisplay?.classList.contains('hidden')) {
@@ -444,6 +530,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (loader) loader.classList.add('hidden');
             hideStreamOutputs(); // Hide streaming areas on connection error
+             if (copyReportBtn) copyReportBtn.classList.add('hidden'); // Hide copy button
 
             // If the report wasn't shown yet, display a connection failure message
             if (finalReportDisplay?.classList.contains('hidden')) {
@@ -463,6 +550,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Initial Setup ---
     connectSSE(); // Start the SSE connection when the page loads
+
+     // Add event listener for the copy button
+     if (copyReportBtn) {
+         copyReportBtn.addEventListener('click', handleCopyClick);
+     } else {
+          console.error("Copy report button not found.");
+     }
 
     // Clean up SSE connection when the user navigates away or closes the tab
     window.addEventListener('beforeunload', () => {
