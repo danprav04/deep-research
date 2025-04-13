@@ -1,3 +1,4 @@
+# --- File: deep_research_app/app.py ---
 # app.py
 import sys
 import os
@@ -349,17 +350,20 @@ def health_check():
     llm_ok = False
     llm_model_name = config.GOOGLE_MODEL_NAME or "Not Configured"
     try:
+        # A more robust check could involve a small, cheap API call if feasible,
+        # but for now, configuration check is sufficient.
         if config.GOOGLE_API_KEY and config.GOOGLE_MODEL_NAME:
-            # Basic check: Assume OK if configured; avoid API calls in health check
+            # Basic check: Assume OK if configured; avoids cost/quota usage.
             llm_ok = True
+            # Potential future check (use cautiously):
+            # genai.list_models() # Example: Simple check if API key is valid
     except Exception as e:
-        # This block might not be reachable if config validation catches it first
-        logger.warning(f"Health check: LLM configuration check failed for model '{llm_model_name}': {e}", exc_info=False)
+        logger.warning(f"Health check: LLM configuration or basic check failed for model '{llm_model_name}': {e}", exc_info=False)
 
     status = {
         "status": "ok",
         "llm_configured": llm_ok,
-        "llm_model": llm_model_name if llm_ok else "Configuration Error"
+        "llm_model": llm_model_name if llm_ok else "Configuration Error or Check Failed"
     }
     http_status = 200 if llm_ok else 503 # Service Unavailable if critical component isn't ready
 
@@ -384,29 +388,26 @@ def favicon():
 @app.errorhandler(429)
 def ratelimit_handler(e):
     """Handles rate limit errors."""
-    # Use the key_func result (IP address) in the log message
     remote_addr = get_remote_address()
     logger.warning(f"Rate limit exceeded: {e.description} from {remote_addr}")
-    # Render a user-friendly error page
     return render_template('error.html',
                            error_code=429,
-                           error_message=f"Too many requests received from your IP address ({e.description}). Please wait a moment and try again."), 429
+                           error_message=f"Too many requests received from your IP address ({e.description}). Please wait a moment and try again.",
+                           pico_css=config.PICO_CSS_CDN), 429
 
 @app.errorhandler(404)
 def not_found_error(error):
     """Handles 404 Not Found errors."""
     remote_addr = get_remote_address() # Get IP via key_func
     logger.warning(f"404 Not Found: {request.path} (Error: {error}) from {remote_addr}")
-    return render_template('404.html'), 404
+    return render_template('404.html', pico_css=config.PICO_CSS_CDN), 404
 
 @app.errorhandler(500)
 def internal_error(error):
     """Handles 500 Internal Server errors."""
     remote_addr = get_remote_address()
-    # Log the detailed error with stack trace
     logger.error(f"Internal Server Error (500): Path: {request.path}, Error: {error} from {remote_addr}", exc_info=True)
-    # Return a generic error page/message
-    return render_template('500.html'), 500
+    return render_template('500.html', pico_css=config.PICO_CSS_CDN), 500
 
 # Catch-all for other Werkzeug/HTTP exceptions and general Python exceptions
 @app.errorhandler(Exception)
@@ -415,19 +416,31 @@ def handle_exception(e):
     from werkzeug.exceptions import HTTPException
 
     remote_addr = get_remote_address()
-    # Log the full exception details
-    # Distinguish between HTTP exceptions (like 400 Bad Request) and unexpected server errors
     if isinstance(e, HTTPException):
-        # For HTTP exceptions, log as warning unless it's 5xx
         log_level = logging.ERROR if e.code >= 500 else logging.WARNING
-        logger.log(log_level, f"HTTP Exception Caught: {e.code} {e.name} for {request.path}. Desc: {e.description}. From: {remote_addr}", exc_info=False) # Don't need full stack for standard HTTP errors
-        # Use the exception's default response rendering
-        return e
+        logger.log(log_level, f"HTTP Exception Caught: {e.code} {e.name} for {request.path}. Desc: {e.description}. From: {remote_addr}", exc_info=False)
+        # Render specific templates for common HTTP errors
+        if e.code == 404:
+             return render_template('404.html', pico_css=config.PICO_CSS_CDN), 404
+        elif e.code == 429:
+             return render_template('error.html',
+                                   error_code=429,
+                                   error_message=f"Too many requests received from your IP address ({e.description}). Please wait.",
+                                   pico_css=config.PICO_CSS_CDN), 429
+        elif e.code >= 500:
+             return render_template('500.html', pico_css=config.PICO_CSS_CDN), e.code
+        else:
+            # For other client errors (4xx) render the generic error template
+             return render_template('error.html',
+                                   error_code=e.code,
+                                   error_message=e.description or e.name or "An error occurred processing your request.",
+                                   pico_css=config.PICO_CSS_CDN), e.code
+        # return e # Or fallback to Werkzeug's default response if preferred
     else:
         # For non-HTTP exceptions, log as critical error with full traceback
         logger.error(f"Unhandled Server Exception: {e} for {request.path}. From: {remote_addr}", exc_info=True)
         # Return the generic 500 error page
-        return render_template('500.html'), 500
+        return render_template('500.html', pico_css=config.PICO_CSS_CDN), 500
 
 
 # --- Production Deployment Note ---
@@ -436,3 +449,27 @@ def handle_exception(e):
 # gunicorn --workers 3 --bind 0.0.0.0:8000 --log-level info --access-logfile - --error-logfile - deep_research_app.app:app
 # Example Waitress command:
 # waitress-serve --host 0.0.0.0 --port 8000 --call deep_research_app.app:app
+
+# Add this block for direct execution (e.g., python app.py for development)
+if __name__ == '__main__':
+    # Use waitress for simple development serving
+    # Note: For true production, use Gunicorn/Waitress via command line as shown above
+    try:
+        from waitress import serve
+        host = os.getenv("FLASK_HOST", "127.0.0.1")
+        port = int(os.getenv("FLASK_PORT", 8000))
+        dev_log_level = os.getenv("LOG_LEVEL", "DEBUG").upper() # Use DEBUG for dev server
+        print(f"--- Development Server ---")
+        print(f"Starting Waitress server on http://{host}:{port}")
+        print(f"Log Level: {dev_log_level}")
+        print(f"Note: For production, run using Gunicorn or Waitress directly.")
+        print(f"--------------------------")
+        # Set Flask app logger level for dev
+        logging.getLogger('flask.app').setLevel(dev_log_level)
+        serve(app, host=host, port=port)
+    except ImportError:
+        print("Waitress not found. Running with Flask's development server (not recommended for production).")
+        app.run(debug=(dev_log_level == 'DEBUG'), host=host, port=port)
+    except Exception as run_err:
+        logger.critical(f"Failed to start development server: {run_err}", exc_info=True)
+        sys.exit(1)
