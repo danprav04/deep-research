@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light"> <!-- Default theme -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>500 - Internal Server Error</title>
+    {# Use the pico_css variable passed from the route #}
+    <link rel="stylesheet" href="{{ pico_css }}">
+    <!-- Link to custom.css for potential shared styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
+    <style>
+        body {
+            padding-top: 2rem;
+            padding-bottom: 5rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center; /* Center content horizontally */
+        }
+        main.container {
+            max-width: 600px; /* Consistent width for centered content */
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center; /* Center content vertically within main */
+            text-align: center; /* Center text */
+        }
+         article {
+            padding: 2rem; /* Standard Pico card padding */
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: var(--pico-border-radius);
+            background-color: var(--pico-card-background-color);
+            box-shadow: var(--pico-box-shadow);
+        }
+        h1 {
+            margin-bottom: 1rem;
+            color: var(--pico-color-red, #d32f2f); /* Error color */
+        }
+        h1 svg { /* Style for icon */
+            width: 1em;
+            height: 1em;
+            margin-right: 0.3em;
+            vertical-align: -0.125em;
+            fill: currentColor;
+        }
+        p { margin-bottom: 1.5rem; }
+        footer {
+            margin-top: 3rem;
+            padding: 1rem 0;
+            text-align: center;
+            font-size: 0.9em;
+            color: var(--pico-muted-color);
+            border-top: 1px solid var(--pico-muted-border-color);
+            width: 100%; /* Make footer full width */
+        }
+        .theme-toggle {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+         }
+         /* Make focus states more visible */
+        *:focus-visible {
+          outline: 2px solid var(--pico-primary-focus);
+          outline-offset: 2px;
+        }
+         /* Ensure link looks like a button */
+         article a[role="button"] {
+             margin-top: 1rem; /* Add space above the button */
+         }
+    </style>
+</head>
+<body>
+    <header class="container" style="max-width: none; padding: 0 1rem;"> <!-- Allow header full width -->
+        <div class="theme-toggle">
+            <button id="theme-toggle-btn" class="outline secondary" data-tooltip="Switch Theme" data-placement="left" aria-label="Switch Theme">🌙</button>
+        </div>
+    </header>
+
+     <main class="container">
+        <article role="alert">
+            <h1>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M11.466 1.725a.5.5 0 0 1 .217.575l-.5 1.5a.5.5 0 0 1-.933.21L9.35 3.055l-1.1 2.2a.5.5 0 0 1-.894 0l-1.1-2.2L5.35 4.012a.5.5 0 0 1-.933-.21l-.5-1.5a.5.5 0 0 1 .217-.575A6.5 6.5 0 0 1 8 1.5a6.5 6.5 0 0 1 3.466.225M8 4a.5.5 0 0 1 .5.5v3.5a.5.5 0 0 1-.336.466l-2 1a.5.5 0 0 1-.528-.832L7.5 8.382V4.5A.5.5 0 0 1 8 4m-6.5 8.5a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5m12.15-.974a.5.5 0 0 0-.574-.217 6.5 6.5 0 0 0-6.852 0 .5.5 0 0 0-.574.217l-.5 1.5a.5.5 0 0 0 .21.933L4.65 14.945l1.1 2.2a.5.5 0 0 0 .894 0l1.1-2.2 1.006.838a.5.5 0 0 0 .723-.21l.5-1.5a.5.5 0 0 0-.21-.933z"/></svg>
+                500 - Internal Server Error
+            </h1>
+            <p>Sorry, something went wrong on our end. We are working to fix the problem.</p>
+            <p>Please try again later or return to the homepage.</p>
+            <a href="{{ url_for('index') }}" role="button" class="contrast outline">Go to Homepage</a>
+        </article>
+    </main>
+
+    <footer>
+        Powered by Google Gemini • Made by Danprav • <a href="{{ url_for('health_check') }}">Health</a>
+    </footer>
+
+    <!-- Theme Toggle Script -->
+     <script>
+        (function() {
+            const themeToggleBtn = document.getElementById('theme-toggle-btn');
+            if (!themeToggleBtn) return;
+
+            const applyTheme = (theme) => {
+                document.documentElement.setAttribute('data-theme', theme);
+                localStorage.setItem('theme', theme);
+                themeToggleBtn.textContent = theme === 'light' ? '🌙' : '☀️';
+                themeToggleBtn.setAttribute('aria-label', theme === 'light' ? 'Switch to Dark Theme' : 'Switch to Light Theme');
+            };
+
+            const currentTheme = localStorage.getItem('theme') || 'light';
+            applyTheme(currentTheme);
+
+            themeToggleBtn.addEventListener('click', () => {
+                let newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+                applyTheme(newTheme);
+            });
+        })();
+    </script>
+</body>
+</html>

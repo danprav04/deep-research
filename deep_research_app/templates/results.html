@@ -1,22 +1,47 @@
+<!-- deep_research_app/templates/results.html -->
+
 <!DOCTYPE html>
-<html lang="en" data-theme="light"> <!-- Default theme -->
+<html lang="en" data-theme="light"> <!-- Theme applied via JS -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Research Results for "{{ topic }}"</title>
+    <!-- Optional: Add meta description specific to results page -->
+    <meta name="description" content="Live progress and final report for the automated research on '{{ topic | e }}'.">
+    <title>Research Results: {{ topic | e }}</title>
+    <!-- Pico CSS CDN -->
     <link rel="stylesheet" href="{{ pico_css }}">
     <!-- Link the custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='custom.css') }}">
 
-    <!-- <<< Load Libraries: DOMPurify and Marked.js >>> -->
-    <!-- DOMPurify for security - Corrected Integrity Hash -->
-    <script src="{{ url_for('static', filename='js/purify.min.js') }}"></script> 
-    <!-- Marked.js for Markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script> <!-- Marked often doesn't provide SRI hashes on its main CDN link -->
-    <!-- <<< END Libraries >>> -->
+    <!-- Load Libraries Locally: DOMPurify -->
+    <!-- Ensure these files exist in deep_research_app/static/js/ -->
+    <script src="{{ url_for('static', filename='js/purify.min.js') }}" defer></script>
+    <!-- Marked.js is optional now, only needed if client-side rendering is a fallback -->
+    <script src="{{ url_for('static', filename='js/marked.min.js') }}" defer></script>
 
+    <style>
+        /* Ensure focus states are visible */
+         *:focus-visible {
+          outline: 2px solid var(--pico-primary-focus);
+          outline-offset: 2px;
+        }
+        /* Style for breadcrumbs */
+        nav[aria-label="breadcrumb"] { margin-bottom: 1.5rem; }
+
+        /* Style for the copy button */
+        .report-actions {
+            margin-bottom: 1.5rem; /* Space between button and report */
+            text-align: right; /* Align button to the right */
+        }
+        #copy-report-btn {
+             /* Add some visual distinction */
+             min-width: 120px; /* Ensure minimum width */
+        }
+        .hidden { display: none !important; } /* Keep hidden utility class */
+
+    </style>
 </head>
-<!-- Pass encoded topic to JS via data attribute -->
+<!-- Pass encoded topic to JS via data attribute, properly escaped -->
 <body data-encoded-topic="{{ encoded_topic | e }}">
     <main class="container">
         <nav aria-label="breadcrumb">
@@ -30,56 +55,70 @@
         <article>
             <header>
                 <hgroup>
-                    <h1>Researching: "{{ topic }}"</h1>
+                    <h1>Researching: "{{ topic | e }}"</h1>
                     <p>Please wait while the research is conducted. Progress updates will appear below.</p>
                 </hgroup>
             </header>
 
             <!-- Progress Log Section -->
-            <section id="progress-section" class="progress-log">
+            <section id="progress-section" class="progress-log" aria-live="polite" aria-atomic="false">
                 <h2>Progress Log <span id="loader" class="loader"></span></h2>
                 <ul id="progress-list">
+                    <!-- JS will populate this -->
                     <li>Initializing connection...</li>
                 </ul>
             </section>
 
-            <!-- Container for Live Streaming Outputs (Hidden Initially) -->
+            <!-- Container for Live Streaming Outputs (Managed by JS) -->
             <section id="report-container" class="hidden">
                 <hr>
                 <!-- Synthesis Output -->
                 <div id="synthesis-output-container">
                     <h2>Live Synthesis Output</h2>
-                    <p class="stream-status"><em>Synthesizing information from sources... (Content will stream below)</em></p>
+                    <p class="stream-status"><em>Preparing to synthesize information from sources...</em></p>
+                    <!-- Role 'log' indicates updates, aria-live polite for screen readers -->
                     <div id="synthesis-output" aria-live="polite" aria-atomic="false" role="log"></div>
                 </div>
 
                 <!-- Report Output -->
                 <div id="report-output-container">
                     <h2>Live Report Generation</h2>
-                    <p class="stream-status"><em>Generating the final report... (Content will stream below)</em></p>
+                    <p class="stream-status"><em>Preparing to generate the final report...</em></p>
                     <div id="report-output" aria-live="polite" aria-atomic="false" role="log"></div>
                 </div>
             </section>
 
-            <!-- Container for Final Report (Hidden Initially) -->
+            <!-- Container for Final Report (Managed by JS) -->
             <section id="final-report-display" class="hidden">
                 <hr>
                 <h2>Final Research Report</h2>
-                <!-- This div will hold the final, styled report HTML -->
+
+                <!-- Add Copy Button Here -->
+                <div class="report-actions">
+                    <button id="copy-report-btn" class="outline secondary hidden" data-tooltip="Copy report text" data-placement="left">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-clipboard" viewBox="0 0 16 16" style="vertical-align: text-bottom; margin-right: 0.3em;">
+                          <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1z"/>
+                          <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0z"/>
+                        </svg>
+                        Copy Report
+                    </button>
+                 </div>
+
+                <!-- This div will hold the final, sanitized report HTML -->
+                <!-- Role 'document' suitable for final report content -->
                 <div id="report-display" role="document">
                     <p><em>Loading final report...</em></p>
                 </div>
             </section>
 
-        </article> <!-- End article wrap -->
+        </article> <!-- End main article wrap -->
 
     </main>
 
-    <!-- <<< Link the main application JavaScript file - Use defer >>> -->
+    <!-- Link the main application JavaScript file -->
     <script src="{{ url_for('static', filename='results.js') }}" defer></script>
-    <!-- <<< END application script >>> -->
 
-    <!-- Simple Theme Toggle Script (can be moved to a global JS file) -->
+    <!-- Theme Application Script -->
      <script>
         // Apply theme from localStorage on load
         const currentTheme = localStorage.getItem('theme') || 'light';

@@ -1,86 +1,148 @@
+# --- File: deep_research_app/config.py ---
 # config.py
 import os
+import sys # Import sys for stderr
 import logging
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env') # Look for .env in parent dir
+# --- Load Environment Variables ---
+# Determine the absolute path to the project root directory
+# Assuming config.py is in 'deep_research_app' which is one level below the project root
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+print(f"INFO: Project Root determined as: {_PROJECT_ROOT}")
+
+# Load .env file from the project root
+dotenv_path = os.path.join(_PROJECT_ROOT, '.env')
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path=dotenv_path)
-    print(f"INFO: Loaded environment variables from: {dotenv_path}") # Use print before logger might be fully set up
+    print(f"INFO: Loaded environment variables from: {dotenv_path}")
 else:
     print(f"INFO: '.env' file not found at {dotenv_path}. Relying on system environment variables.")
 
-# --- Configure Logging Early ---
-# Basic config, can be overridden/enhanced in app.py
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# --- Google API Key and Model Name ---
+# --- Core App Settings ---
+# Load required secrets from environment
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME")
+GOOGLE_MODEL_NAME = os.getenv("GOOGLE_MODEL_NAME", "gemini-1.5-flash-latest") # Sensible default model
+FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY") # MUST be set in production for security
 
-# Early exit if critical variables are missing
-if not GOOGLE_API_KEY:
-    logging.critical("FATAL: GOOGLE_API_KEY environment variable not set.")
-    raise ValueError("FATAL: GOOGLE_API_KEY environment variable not set.")
-if not GOOGLE_MODEL_NAME:
-    logging.critical("FATAL: GOOGLE_MODEL_NAME environment variable not set.")
-    raise ValueError("FATAL: GOOGLE_MODEL_NAME environment variable not set.")
+# --- Logging Configuration ---
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# Default log directory within the project root
+_DEFAULT_LOG_DIR = os.path.join(_PROJECT_ROOT, 'logs')
+# Ensure the default log file path is absolute
+_DEFAULT_LOG_FILE = os.path.abspath(os.path.join(_DEFAULT_LOG_DIR, 'deep_research.log'))
+# Use absolute path from env var if provided, otherwise use the calculated absolute default
+LOG_FILE_PATH = os.path.abspath(os.getenv("LOG_FILE_PATH", _DEFAULT_LOG_FILE))
+LOG_ROTATION_DAYS = int(os.getenv("LOG_ROTATION_DAYS", 14)) # Keep logs for 2 weeks
+
+# --- Rate Limiting (Flask Limiter) ---
+# This limit applies ONLY to routes explicitly decorated with @limiter.limit(DEFAULT_RATE_LIMIT)
+# Ensure DEFAULT_RATE_LIMIT env var is unset or matches this if overriding.
+DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "10 per minute") # User's previous value
 
 # --- Search Configuration ---
-MAX_SEARCH_RESULTS_PER_ENGINE_STEP: int = 8 # Slightly reduced default
-MAX_TOTAL_URLS_TO_SCRAPE: int = 50 # Reduced default for RAM/time
-MAX_WORKERS: int = 5 # Concurrent scraping workers
-REQUEST_TIMEOUT: int = 15 # Slightly increased timeout for requests
-USER_AGENT: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36" # Keep generic UA
-PICO_CSS_CDN: str = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"
-DDGS_RETRY_DELAY_SECONDS: float = 3.0 # Delay for DDGS rate limit retries
-INTER_SEARCH_DELAY_SECONDS: float = 1.0 # Shorter delay between search keywords within a step
+# Sensible defaults for production, adjustable via environment variables
+MAX_SEARCH_RESULTS_PER_ENGINE_STEP: int = int(os.getenv("MAX_SEARCH_RESULTS_PER_ENGINE_STEP", 5))
+MAX_TOTAL_URLS_TO_SCRAPE: int = int(os.getenv("MAX_TOTAL_URLS_TO_SCRAPE", 20))
+MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", 3)) # Adjust based on server CPU/RAM
+REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", 15)) # Slightly shorter timeout
+USER_AGENT: str = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")
+
+# Production-safe search delays - adjust via env vars if needed
+DDGS_RETRY_DELAY_SECONDS: float = float(os.getenv("DDGS_RETRY_DELAY_SECONDS", 5.0))
+INTER_SEARCH_DELAY_SECONDS: float = float(os.getenv("INTER_SEARCH_DELAY_SECONDS", 8.0))
 
 # --- Content Processing ---
-# Target token limit for the LLM context (adjust based on the specific model used)
-# Gemini 1.5 Flash/Pro often handle large contexts well, but keep it reasonable for performance/cost.
-TARGET_MAX_CONTEXT_TOKENS: int = 500000 # Reduced default target
+TARGET_MAX_CONTEXT_TOKENS: int = int(os.getenv("TARGET_MAX_CONTEXT_TOKENS", 700000))
 CHARS_PER_TOKEN_ESTIMATE: float = 4.0 # General estimate
-MAX_CONTEXT_CHARS_SAFETY_MARGIN: float = 0.9 # Use 90% of estimated max chars
-# Calculate the approximate character limit for the *entire* context payload
+MAX_CONTEXT_CHARS_SAFETY_MARGIN: float = 0.9 # Use 90% of estimated char limit
 MAX_CONTEXT_CHARS: int = int(TARGET_MAX_CONTEXT_TOKENS * CHARS_PER_TOKEN_ESTIMATE * MAX_CONTEXT_CHARS_SAFETY_MARGIN)
-logging.info(f"Calculated MAX_CONTEXT_CHARS for LLM: {MAX_CONTEXT_CHARS:,}")
 
-MIN_MEANINGFUL_WORDS_PER_PAGE: int = 50 # Minimum words to consider a scrape successful
-MAX_SCRAPE_CONTENT_LENGTH_MB: int = 5 # Limit max size of HTML download for scraping
+MIN_MEANINGFUL_WORDS_PER_PAGE: int = int(os.getenv("MIN_MEANINGFUL_WORDS_PER_PAGE", 50))
+MAX_SCRAPE_CONTENT_LENGTH_MB: int = int(os.getenv("MAX_SCRAPE_CONTENT_LENGTH_MB", 2))
 MAX_SCRAPE_CONTENT_BYTES: int = MAX_SCRAPE_CONTENT_LENGTH_MB * 1024 * 1024
+MIN_SANITIZED_CONTENT_LENGTH: int = int(os.getenv("MIN_SANITIZED_CONTENT_LENGTH", 200))
 
 # --- LLM Configuration ---
-LLM_TEMPERATURE: float = 0.6 # Controls randomness (creativity vs. factuality)
-LLM_MAX_RETRIES: int = 3 # Retries on transient API errors
-LLM_RETRY_DELAY: int = 5 # Seconds between retries
+LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", 0.5))
+LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", 2)) # Max retries for *non*-rate-limit errors
+LLM_RETRY_DELAY: int = int(os.getenv("LLM_RETRY_DELAY", 7)) # Base delay for *non*-rate-limit errors
 
-# Safety Settings for Google Generative AI
-# Using string names directly as supported by recent API versions
-# Valid settings: BLOCK_NONE, BLOCK_ONLY_HIGH, BLOCK_MEDIUM_AND_ABOVE, BLOCK_LOW_AND_ABOVE
-BLOCK_LEVEL = "BLOCK_MEDIUM_AND_ABOVE"
+# Rate Limit Specific Retries (NEW)
+LLM_RATE_LIMIT_RETRY_DELAY: int = int(os.getenv("LLM_RATE_LIMIT_RETRY_DELAY", 20)) # Longer delay for rate limit (seconds)
+LLM_MAX_RATE_LIMIT_RETRIES: int = int(os.getenv("LLM_MAX_RATE_LIMIT_RETRIES", 15)) # Max retries for rate limit errors (~5 mins total wait if delay is 20s)
+
+# Safety Settings
+BLOCK_LEVEL = os.getenv("GOOGLE_SAFETY_BLOCK_LEVEL", "BLOCK_MEDIUM_AND_ABOVE")
+_VALID_BLOCK_LEVELS = ["BLOCK_NONE", "BLOCK_ONLY_HIGH", "BLOCK_MEDIUM_AND_ABOVE", "BLOCK_LOW_AND_ABOVE"]
+if BLOCK_LEVEL not in _VALID_BLOCK_LEVELS:
+    print(f"WARNING: Invalid GOOGLE_SAFETY_BLOCK_LEVEL '{BLOCK_LEVEL}'. Falling back to BLOCK_MEDIUM_AND_ABOVE.", file=sys.stderr)
+    BLOCK_LEVEL = "BLOCK_MEDIUM_AND_ABOVE"
+
 SAFETY_SETTINGS = {
     "HARM_CATEGORY_HARASSMENT": BLOCK_LEVEL,
     "HARM_CATEGORY_HATE_SPEECH": BLOCK_LEVEL,
     "HARM_CATEGORY_SEXUALLY_EXPLICIT": BLOCK_LEVEL,
     "HARM_CATEGORY_DANGEROUS_CONTENT": BLOCK_LEVEL,
 }
-logging.info(f"Using LLM safety block level: {BLOCK_LEVEL}")
 
 # --- File Handling ---
-# Define the directory for temporary scraped files (relative to this config file's location)
 _TEMP_FILE_DIR_NAME = "temp_scrape_files"
-TEMP_FILE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), _TEMP_FILE_DIR_NAME))
+# Ensure TEMP_FILE_DIR is absolute, placed inside the project root
+TEMP_FILE_DIR = os.path.abspath(os.path.join(_PROJECT_ROOT, _TEMP_FILE_DIR_NAME))
 
-# Ensure the temp directory exists (optional: create if not present)
+# Create TEMP_FILE_DIR if it doesn't exist during config loading
 if not os.path.exists(TEMP_FILE_DIR):
     try:
-        os.makedirs(TEMP_FILE_DIR)
-        logging.info(f"Created temporary directory: {TEMP_FILE_DIR}")
+        os.makedirs(TEMP_FILE_DIR, exist_ok=True)
+        print(f"INFO: Ensured temporary directory exists: {TEMP_FILE_DIR}")
+        if not os.access(TEMP_FILE_DIR, os.W_OK):
+             raise OSError(f"Temporary directory '{TEMP_FILE_DIR}' exists but is not writable.")
     except OSError as e:
-        logging.error(f"Could not create temporary directory {TEMP_FILE_DIR}: {e}. Please create it manually.", exc_info=True)
-        # Depending on requirements, you might want to raise an error here
-        # raise OSError(f"Failed to create required temporary directory: {TEMP_FILE_DIR}") from e
+        print(f"ERROR: Could not create or access temporary directory {TEMP_FILE_DIR}: {e}. Scraping will likely fail.", file=sys.stderr)
+    except Exception as e:
+        print(f"ERROR: Unexpected error setting up temporary directory {TEMP_FILE_DIR}: {e}. Scraping will likely fail.", file=sys.stderr)
 
-DOWNLOAD_FILENAME_MAX_LENGTH: int = 200 # Max length for downloaded filenames (unused currently)
+
+# --- Frontend ---
+PICO_CSS_CDN: str = "https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"
+
+
+# --- Validation ---
+_validation_errors = []
+if not GOOGLE_API_KEY:
+    _validation_errors.append("GOOGLE_API_KEY environment variable not set.")
+if not GOOGLE_MODEL_NAME:
+     _validation_errors.append("GOOGLE_MODEL_NAME environment variable not set (or using default).")
+if not FLASK_SECRET_KEY:
+    _validation_errors.append("FLASK_SECRET_KEY environment variable not set (critical for session security).")
+
+if _validation_errors:
+     print("--- CRITICAL CONFIGURATION ERRORS ---", file=sys.stderr)
+     for err in _validation_errors:
+         print(f"- {err}", file=sys.stderr)
+     print("--- APPLICATION STARTUP HALTED ---", file=sys.stderr)
+     raise ValueError("FATAL: Missing critical configuration. Please set the required environment variables.")
+
+
+# --- Final Configuration Summary ---
+print("\n--- Configuration Summary ---")
+print(f"Project Root: {_PROJECT_ROOT}")
+print(f"Log Level: {LOG_LEVEL}")
+print(f"Log File Path (Absolute): {LOG_FILE_PATH}")
+print(f"Temporary Files Directory: {TEMP_FILE_DIR}")
+print(f"Google Model: {GOOGLE_MODEL_NAME}")
+print(f"Flask Secret Key Set: {'Yes' if FLASK_SECRET_KEY else 'NO (WARNING!)'}")
+print(f"Max Scrape URLs: {MAX_TOTAL_URLS_TO_SCRAPE}")
+print(f"Max Workers (Scraping): {MAX_WORKERS}")
+print(f"Target Max Context Tokens (LLM): {TARGET_MAX_CONTEXT_TOKENS:,}")
+print(f"Calculated Max Context Chars (LLM): {MAX_CONTEXT_CHARS:,}")
+print(f"Max Scrape Size (MB): {MAX_SCRAPE_CONTENT_LENGTH_MB}")
+print(f"LLM Safety Level: {BLOCK_LEVEL}")
+print(f"LLM General Max Retries: {LLM_MAX_RETRIES}")
+print(f"LLM Rate Limit Max Retries: {LLM_MAX_RATE_LIMIT_RETRIES}") # New
+print(f"LLM Rate Limit Retry Delay: {LLM_RATE_LIMIT_RETRY_DELAY}s") # New
+print(f"Rate Limit (Decorated Routes): {DEFAULT_RATE_LIMIT} per IP")
+print(f"DDGS Retry Delay Base: {DDGS_RETRY_DELAY_SECONDS}s")
+print(f"Inter-Search Step Delay: {INTER_SEARCH_DELAY_SECONDS}s")
+print("---------------------------\n")

@@ -7,3 +7,6 @@ __pycache__/
 venv
 project_context.txt
 temp_scrape_files
+buffer.py
+*.log
+/deep_research_app/logs

@@ -1,57 +1,136 @@
-# utils.py
+# deep_research_app/utils.py
 import re
 import json
 import html
 import logging
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional
 
 from markdown_it import MarkdownIt
+from markdown_it.utils import OptionsDict
 from mdit_py_plugins.footnote import footnote_plugin
-# from mdit_py_plugins.front_matter import front_matter_plugin # Example: if you need front matter
-# from mdit_py_plugins.tasklists import tasklists_plugin # Example: if you need task lists
+from mdit_py_plugins.attrs import attrs_plugin # Allows adding attributes like classes/IDs
+from mdit_py_plugins.deflist import deflist_plugin # Definition lists
+from mdit_py_plugins.tasklists import tasklists_plugin # Task lists
+import bleach # For sanitizing scraped content *before* LLM
+from html import escape
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
 JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.MULTILINE)
-# Pattern to find the raw URL citations inserted by the synthesis step
-CITATION_URL_PATTERN = re.compile(r"\[Source URL:\s*(https?://[^\s\]]+)\s*\]")
+# Pattern to find the raw URL citations inserted by the synthesis step (kept for reference, but replacement is done by LLM now)
+# CITATION_URL_PATTERN = re.compile(r"\[Source URL:\s*(https?://[^\s\]]+)\s*\]")
 
-# --- Configure Markdown-it Instance ---
-# Initialize with 'commonmark' preset for base compliance.
-# Enable useful features:
-# - html=True: Allows raw HTML in Markdown (use with caution if input is untrusted)
-# - linkify=True: Auto-detects URLs and makes them links
-# - typographer=True: Enables smart quotes, dashes, etc.
-# Enable specific GFM (GitHub Flavored Markdown) features and plugins:
+# --- Bleach Configuration (for Sanitizing Scraped Content BEFORE LLM) ---
+# Define allowed tags - focus on text structure and semantics, remove interactive/scripting/styling
+ALLOWED_TAGS_FOR_LLM = [
+    'p', 'br', 'b', 'strong', 'i', 'em', 'u', 'strike', 'del', 's',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'ul', 'ol', 'li',
+    'blockquote', 'code', 'pre',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td',
+    'a', # Keep links, href will be checked/cleaned separately if needed
+    'dl', 'dt', 'dd', # Definition lists
+    # Maybe allow 'figure', 'figcaption'? For now, keep it minimal.
+]
+# Allow only basic attributes, mainly 'href' for links
+ALLOWED_ATTRS_FOR_LLM = {
+    'a': ['href'],
+    'th': ['colspan', 'rowspan'],
+    'td': ['colspan', 'rowspan'],
+}
+
+# --- Configure Markdown-it Instance (for Final Report Rendering) ---
+# Initialize with 'gfm-like' preset for common features.
+md_options: OptionsDict = {
+    "html": False,       # Disable raw HTML tags in final report Markdown for security
+    "linkify": False,    # *** DISABLED: Requires linkify-it-py which is not installed ***
+    "typographer": True, # Enable smart quotes, dashes, etc.
+    "breaks": True,      # Convert single newlines in paragraphs to <br> (GFM style)
+}
 md = (
-    MarkdownIt("commonmark", {
-        "html": True,        # Allow HTML tags
-        "linkify": True,     # Autoconvert URL-like text to links
-        "typographer": True, # Enable smart quotes, dashes, etc.
-        "breaks": False,     # Keep True if you want single newlines converted to <br> (GFM style)
-    })
-    .enable("table")          # Enable GFM tables
-    .enable("strikethrough")  # Enable GFM strikethrough (~~text~~)
-    # .enable("tasklist") # If using tasklists_plugin: Enable task lists [-] [x]
+    MarkdownIt("gfm-like", md_options)
+    .enable("table")          # Ensure GFM tables are enabled
+    .enable("strikethrough")  # Ensure GFM strikethrough is enabled
     .use(footnote_plugin)     # Enable footnotes ([^1], [^1]: text)
-    # .use(front_matter_plugin) # Example: Enable YAML front matter parsing
-    # .use(tasklists_plugin, enabled=True) # Example: Enable task list rendering
+    .use(attrs_plugin)        # Enable adding attributes like {.class #id}
+    .use(deflist_plugin)      # Enable definition lists
+    .use(tasklists_plugin, enabled=True) # Enable task lists [-] [x]
+    # Disable rules that could be risky if bad markdown is generated
+    .disable('html_inline')
+    .disable('html_block')
 )
-logger.info("Markdown-it parser configured with commonmark base, table, strikethrough, and footnote plugins.")
+logger.info("Markdown-it parser configured for final report rendering (gfm-like, html disabled, linkify disabled).")
 
 
 # --- Functions ---
+
+def sanitize_scraped_content(html_content: str, url: str = "Unknown URL") -> str:
+    """
+    Sanitizes scraped HTML content to remove potentially harmful elements
+    before sending it to an LLM. Uses Bleach library.
+
+    Args:
+        html_content: The raw HTML string scraped from a webpage.
+        url: The URL from which the content was scraped (for logging).
+
+    Returns:
+        A sanitized string containing only allowed HTML tags and attributes,
+        or plain text if HTML parsing/cleaning fails significantly.
+    """
+    if not html_content or not html_content.strip():
+        return ""
+
+    try:
+        # Use Bleach to clean the HTML according to allowed lists
+        cleaned_html = bleach.clean(
+            html_content,
+            tags=ALLOWED_TAGS_FOR_LLM,
+            attributes=ALLOWED_ATTRS_FOR_LLM,
+            strip=True,  # Remove disallowed tags entirely
+            strip_comments=True
+        )
+
+        # Optional: Further simplify? e.g., convert headings to bold text?
+        # For now, keep basic structure.
+
+        # Get text content as a fallback or primary method if HTML structure isn't crucial
+        # soup = BeautifulSoup(cleaned_html, 'html.parser')
+        # plain_text = soup.get_text(separator='\n', strip=True)
+        # return plain_text # If plain text is preferred
+
+        logger.debug(f"Sanitized content for {url[:70]}... Original length: {len(html_content)}, Cleaned length: {len(cleaned_html)}")
+        return cleaned_html.strip()
+
+    except Exception as e:
+        logger.error(f"Error sanitizing HTML content for {url[:70]}... with Bleach: {e}", exc_info=False)
+        # Fallback: Try to extract plain text aggressively if Bleach fails
+        try:
+            from bs4 import BeautifulSoup # Local import for fallback only
+            soup = BeautifulSoup(html_content, 'html.parser')
+            # Remove script/style first
+            for element in soup(["script", "style", "nav", "footer", "aside", "header", "form"]):
+                element.decompose()
+            plain_text = soup.get_text(separator='\n', strip=True)
+            logger.warning(f"Sanitization failed for {url[:70]}, falling back to basic text extraction.")
+            # Very basic cleaning of excessive newlines
+            return re.sub(r'\n{3,}', '\n\n', plain_text).strip()
+        except Exception as fallback_e:
+            logger.error(f"Fallback text extraction also failed for {url[:70]}: {fallback_e}", exc_info=False)
+            # Last resort: return an empty string or a placeholder error
+            return "[Content Sanitization Failed]"
+
 
 def parse_research_plan(llm_response: str) -> List[Dict[str, Any]]:
     """
     Parses the LLM response to extract the JSON research plan.
     Handles cases with or without the ```json block and validates structure.
+    Returns an empty list or list indicating failure on error.
     """
-    if not llm_response:
+    if not llm_response or not llm_response.strip():
         logger.error("Attempted to parse an empty LLM response for research plan.")
-        return [{"step": "Failed to parse research plan: LLM response was empty.", "keywords": []}]
+        return [{"step": "Failed to parse research plan: LLM response was empty.", "keywords": []}] # Indicate failure
 
     match = JSON_BLOCK_PATTERN.search(llm_response)
     json_content = ""
@@ -59,6 +138,12 @@ def parse_research_plan(llm_response: str) -> List[Dict[str, Any]]:
 
     if match:
         json_content = match.group(1).strip()
+        # Handle potential escaped characters if LLM escapes them within the block
+        try:
+            # Basic unescaping - might need more robust handling if complex escapes are used
+            json_content = bytes(json_content, "utf-8").decode("unicode_escape")
+        except Exception as decode_err:
+             logger.warning(f"Could not decode unicode escapes in JSON block, proceeding anyway: {decode_err}")
         parse_method = "json block"
     else:
         # Fallback: Try parsing the whole response if it looks like a JSON list/object
@@ -67,23 +152,29 @@ def parse_research_plan(llm_response: str) -> List[Dict[str, Any]]:
             json_content = stripped_response
             parse_method = "direct list"
         elif stripped_response.startswith('{') and stripped_response.endswith('}'):
-             # Handle case where LLM might wrap the list in an object (e.g., {"plan": [...]})
              try:
                  potential_obj = json.loads(stripped_response)
-                 # Look for a key that holds a list (common variations)
-                 for key in potential_obj:
-                     if isinstance(potential_obj[key], list):
-                         json_content = json.dumps(potential_obj[key]) # Re-serialize the list part
+                 # Look for common keys that might hold the plan list
+                 for key in ['plan', 'research_plan', 'steps', 'keywords', 'result']:
+                     if isinstance(potential_obj.get(key), list):
+                         json_content = json.dumps(potential_obj[key]) # Re-serialize just the list
                          parse_method = f"nested list in key '{key}'"
                          break
                  if not json_content:
-                     raise ValueError("JSON object found, but no list value detected within it.")
+                     # If no common key found, check if *any* value is a list
+                    for key, value in potential_obj.items():
+                        if isinstance(value, list):
+                            json_content = json.dumps(value)
+                            parse_method = f"nested list in key '{key}' (generic)"
+                            break
+                 if not json_content:
+                    raise ValueError("JSON object found, but no list value detected within it using common keys.")
              except (json.JSONDecodeError, ValueError) as e:
                  logger.warning(f"Failed fallback attempt to parse response as JSON object containing list: {e}")
                  # Continue to error reporting below
-
         if not json_content:
-            logger.error(f"Failed to parse research plan. No ```json block found and response doesn't appear to be a JSON list or recognized object. Response snippet: {llm_response[:200]}...")
+            # Log the failure but return specific failure indicator list
+            logger.error(f"Failed to parse research plan. No ```json block found and response doesn't appear to be a valid JSON list or recognized object. Response snippet: {llm_response[:200]}...")
             return [{"step": "Failed to parse research plan: Could not find or parse JSON structure.", "keywords": []}]
 
     # --- Try parsing the extracted/identified JSON content ---
@@ -99,36 +190,43 @@ def parse_research_plan(llm_response: str) -> List[Dict[str, Any]]:
              raise ValueError("Parsed plan is an empty list.")
 
         validated_plan = []
+        required_keys = {"step", "keywords"}
         for i, item in enumerate(plan):
             if not isinstance(item, dict):
-                raise TypeError(f"Item at index {i} is not a dictionary: {item}")
-            if 'step' not in item or not isinstance(item['step'], str) or not item['step'].strip():
-                raise ValueError(f"Item at index {i} missing 'step' key or step is empty: {item}")
-            if 'keywords' not in item:
-                 logger.warning(f"Item at index {i} missing 'keywords' key. Defaulting to empty list. Item: {item}")
-                 item['keywords'] = [] # Add default empty list
-            elif not isinstance(item['keywords'], list):
-                 # Attempt to fix if keywords are a single string instead of a list
-                 if isinstance(item['keywords'], str):
-                      logger.warning(f"Fixing 'keywords' field for step '{item['step']}' - was string, expected list. Splitting by comma.")
-                      item['keywords'] = [kw.strip() for kw in item['keywords'].split(',') if kw.strip()]
-                 else:
-                      raise TypeError(f"Keywords for step '{item['step']}' is not a list or string: {type(item['keywords'])}")
+                raise TypeError(f"Plan item at index {i} is not a dictionary: {item}")
 
-            # Ensure keywords are strings
-            item['keywords'] = [str(kw) for kw in item['keywords'] if isinstance(kw, (str, int, float)) and str(kw).strip()]
+            if not required_keys.issubset(item.keys()):
+                 missing = required_keys - item.keys()
+                 raise ValueError(f"Plan item at index {i} is missing required keys: {missing}. Item: {item}")
+
+            step = item.get('step')
+            keywords = item.get('keywords')
+
+            if not step or not isinstance(step, str) or not step.strip():
+                raise ValueError(f"Item at index {i} has invalid or empty 'step': {item}")
+            if not isinstance(keywords, list):
+                 # Attempt to fix if keywords are a single string instead of a list
+                 if isinstance(keywords, str):
+                      logger.warning(f"Fixing 'keywords' field for step '{step}' - was string, expected list. Splitting by comma.")
+                      keywords = [kw.strip() for kw in keywords.split(',') if kw.strip()]
+                 else:
+                      raise TypeError(f"Keywords for step '{step}' is not a list or string: {type(keywords)}")
+
+            # Ensure keywords are non-empty strings
+            valid_keywords = [str(kw).strip() for kw in keywords if kw and isinstance(kw, (str, int, float)) and str(kw).strip()]
+            item['keywords'] = valid_keywords # Update item with cleaned keywords
             validated_plan.append(item)
 
         logger.info(f"Successfully parsed and validated research plan with {len(validated_plan)} steps.")
         return validated_plan
 
     except (json.JSONDecodeError, TypeError, ValueError) as e:
-        logger.error(f"Failed to parse or validate JSON for research plan. Method: {parse_method}. Error: {e}", exc_info=True)
-        logger.error(f"Problematic JSON Content Snippet: {json_content[:500]}...")
-        return [{"step": f"Failed to parse/validate JSON in plan: {e}", "keywords": []}]
+        logger.error(f"Failed to parse or validate JSON for research plan. Method: {parse_method}. Error: {e}", exc_info=False) # Keep log less verbose
+        logger.debug(f"Problematic JSON Content Snippet for plan parsing: {json_content[:500]}...")
+        return [{"step": f"Failed to parse/validate JSON in plan: {escape(str(e))}", "keywords": []}] # Return failure indicator
     except Exception as e:
          logger.error(f"Unexpected error parsing research plan: {e}", exc_info=True)
-         return [{"step": f"Unexpected error parsing plan: {e}", "keywords": []}]
+         return [{"step": f"Unexpected error parsing plan: {escape(str(e))}", "keywords": []}] # Return failure indicator
 
 
 def generate_bibliography_map(scraped_sources: List[Dict[str, Any]]) -> Tuple[Dict[str, int], str]:
@@ -137,8 +235,8 @@ def generate_bibliography_map(scraped_sources: List[Dict[str, Any]]) -> Tuple[Di
     string list suitable for inclusion in an LLM prompt.
 
     Args:
-        scraped_sources: A list of dictionaries, where each dict represents a
-                         successfully scraped source and contains at least an 'url' key.
+        scraped_sources: A list of dictionaries from successfully scraped sources,
+                         each containing at least a valid 'url' key.
 
     Returns:
         A tuple containing:
@@ -151,57 +249,73 @@ def generate_bibliography_map(scraped_sources: List[Dict[str, Any]]) -> Tuple[Di
     processed_urls = set() # Handle potential duplicate URLs in input list
 
     for source in scraped_sources:
-        url = source.get('url')
-        if url and isinstance(url, str) and url.strip() and url not in processed_urls:
-            url_to_index_map[url] = citation_index
-            bibliography_entries.append(f"[{citation_index}]: {url}")
-            processed_urls.add(url)
-            citation_index += 1
-        elif url in processed_urls:
-            logger.warning(f"Duplicate URL found in scraped sources list, skipping for bibliography: {url}")
-        # else: logger.debug(f"Skipping invalid or missing URL in source for bibliography: {source}")
+        # Validate source structure and URL presence/type
+        if isinstance(source, dict) and 'url' in source:
+            url = source.get('url')
+            if url and isinstance(url, str) and url.strip().startswith(('http://', 'https://')):
+                # Normalize URL slightly? (e.g., remove fragment, trailing slash?) - Be careful not to break matching.
+                # url_normalized = url.split('#')[0].rstrip('/')
+                url_normalized = url # Keep original URL for now to ensure exact match with synthesis output
+
+                if url_normalized not in processed_urls:
+                    url_to_index_map[url_normalized] = citation_index
+                    bibliography_entries.append(f"[{citation_index}]: {url_normalized}")
+                    processed_urls.add(url_normalized)
+                    citation_index += 1
+                # else: logger.debug(f"Duplicate URL '{url_normalized}' skipped for bibliography.")
+            else:
+                logger.warning(f"Invalid or non-HTTP(S) URL found in source dict, skipping for bibliography: {url}")
+        else:
+            logger.warning(f"Invalid source item format encountered, skipping for bibliography: {source}")
 
 
     bibliography_prompt_list = "\n".join(bibliography_entries)
-    logger.info(f"Generated bibliography map with {len(url_to_index_map)} unique entries.")
+    if not bibliography_entries:
+        logger.warning("Generated an empty bibliography map. No valid scraped sources provided.")
+    else:
+        logger.info(f"Generated bibliography map with {len(url_to_index_map)} unique entries.")
+
     return url_to_index_map, bibliography_prompt_list
 
 
 def convert_markdown_to_html(markdown_text: str) -> str:
     """
     Converts Markdown text to HTML using the configured markdown-it-py instance.
-    Includes basic error handling and fallbacks.
+    Includes basic error handling and fallbacks. Ensures HTML is disabled.
     """
     if not markdown_text or not markdown_text.strip():
         logger.warning("Attempted to convert empty or whitespace-only Markdown to HTML.")
-        return "<p><em>Report content is empty or contains only whitespace.</em></p>"
+        # Return semantic HTML indicating emptiness
+        return "<article><p><em>Report content is empty or contains only whitespace.</em></p></article>"
     try:
         # Render the markdown to HTML using the pre-configured 'md' instance
         html_output = md.render(markdown_text)
 
         if not html_output or not html_output.strip():
              logger.warning("Markdown rendering resulted in empty or whitespace-only HTML.")
-             # Provide context in the fallback message
              escaped_md_snippet = html.escape(markdown_text[:200]) + ('...' if len(markdown_text) > 200 else '')
-             return f"<p><em>Markdown conversion resulted in empty HTML. Raw content snippet:</em></p><pre><code>{escaped_md_snippet}</code></pre>"
+             return f"<article><p><em>Markdown conversion resulted in empty HTML. Raw content snippet:</em></p><pre><code>{escaped_md_snippet}</code></pre></article>"
 
-        # logger.debug(f"Successfully converted Markdown to HTML (length: {len(html_output)} chars).")
-        return html_output
+        # Wrap the output in <article> for semantic structure
+        return f"<article>{html_output}</article>"
 
     except Exception as e:
         # Catch any unexpected errors during rendering
         logger.error(f"Unexpected error converting Markdown to HTML: {e}", exc_info=True)
-        # Provide a more informative error message in the HTML output
         escaped_md_snippet = html.escape(markdown_text[:500]) + ('...' if len(markdown_text) > 500 else '')
         error_details = html.escape(str(e))
+        # Return semantic error HTML
         return (
-            f"<pre><strong>Unexpected error during Markdown conversion:</strong>\n"
-            f"{error_details}\n\n"
-            f"<strong>Raw Markdown Snippet:</strong>\n"
-            f"{escaped_md_snippet}</pre>"
+            f"<article>"
+            f"<h2>Markdown Conversion Error</h2>"
+            f"<p><strong>An unexpected error occurred while rendering the report content:</strong></p>"
+            f"<pre><code>{error_details}</code></pre>"
+            f"<p><strong>Raw Markdown Snippet:</strong></p>"
+            f"<pre><code>{escaped_md_snippet}</code></pre>"
+            f"</article>"
         )
 
-# --- Placeholder for future citation replacement if needed outside LLM ---
+# --- Citation replacement function (kept for reference, but LLM does it now) ---
 # def replace_citations_with_footnotes(text: str, url_map: Dict[str, int]) -> str:
 #     """Replaces [Source URL: <url>] with footnote markers [^N]."""
 #     def replace_match(match):
