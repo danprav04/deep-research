@@ -45,17 +45,17 @@ DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "15 per minute")
 # --- Search Configuration ---
 # ** TUNED FOR LOWER RAM (1GB SERVER) - MONITOR AND ADJUST **
 MAX_SEARCH_RESULTS_PER_ENGINE_STEP: int = int(os.getenv("MAX_SEARCH_RESULTS_PER_ENGINE_STEP", 5))
-MAX_TOTAL_URLS_TO_SCRAPE: int = int(os.getenv("MAX_TOTAL_URLS_TO_SCRAPE", 15))
+MAX_TOTAL_URLS_TO_SCRAPE: int = int(os.getenv("MAX_TOTAL_URLS_TO_SCRAPE", 25))
 MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", 3))
 REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", 20))
 USER_AGENT: str = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 
-# ** INCREASED DELAYS TO MITIGATE DDG RATE LIMITING **
-DDGS_RETRY_DELAY_SECONDS: float = float(os.getenv("DDGS_RETRY_DELAY_SECONDS", 7.0)) # Slightly longer base retry delay
-INTER_SEARCH_DELAY_SECONDS: float = float(os.getenv("INTER_SEARCH_DELAY_SECONDS", 15.0)) # << SIGNIFICANTLY INCREASED delay between search steps
+# ** DECREASED DELAYS AS REQUESTED - MAY INCREASE RATE LIMITING **
+DDGS_RETRY_DELAY_SECONDS: float = float(os.getenv("DDGS_RETRY_DELAY_SECONDS", 0.5)) # << SIGNIFICANTLY DECREASED base retry delay
+INTER_SEARCH_DELAY_SECONDS: float = float(os.getenv("INTER_SEARCH_DELAY_SECONDS", 1)) # << SIGNIFICANTLY DECREASED delay between search steps
 
 # --- Content Processing ---
-TARGET_MAX_CONTEXT_TOKENS: int = int(os.getenv("TARGET_MAX_CONTEXT_TOKENS", 80000))
+TARGET_MAX_CONTEXT_TOKENS: int = int(os.getenv("TARGET_MAX_CONTEXT_TOKENS", 700000))
 CHARS_PER_TOKEN_ESTIMATE: float = 4.0
 MAX_CONTEXT_CHARS_SAFETY_MARGIN: float = 0.9
 MAX_CONTEXT_CHARS: int = int(TARGET_MAX_CONTEXT_TOKENS * CHARS_PER_TOKEN_ESTIMATE * MAX_CONTEXT_CHARS_SAFETY_MARGIN)
@@ -123,6 +123,6 @@ print(f"Calculated Max Context Chars: {MAX_CONTEXT_CHARS:,}")
 print(f"Max Scrape Size (MB): {MAX_SCRAPE_CONTENT_LENGTH_MB}")
 print(f"LLM Safety Level: {BLOCK_LEVEL}")
 print(f"Rate Limit: {DEFAULT_RATE_LIMIT}")
-print(f"DDGS Retry Delay Base: {DDGS_RETRY_DELAY_SECONDS}s")
-print(f"Inter-Search Step Delay: {INTER_SEARCH_DELAY_SECONDS}s")
+print(f"DDGS Retry Delay Base: {DDGS_RETRY_DELAY_SECONDS}s") # <-- Updated
+print(f"Inter-Search Step Delay: {INTER_SEARCH_DELAY_SECONDS}s") # <-- Updated
 print("---------------------------")
