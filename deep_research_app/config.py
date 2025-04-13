@@ -40,7 +40,7 @@ LOG_FILE_PATH = os.path.abspath(os.getenv("LOG_FILE_PATH", _DEFAULT_LOG_FILE))
 LOG_ROTATION_DAYS = int(os.getenv("LOG_ROTATION_DAYS", 7))
 
 # --- Rate Limiting ---
-DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "15 per minute")
+DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "1 per minute")
 
 # --- Search Configuration ---
 # ** TUNED FOR LOWER RAM (1GB SERVER) - MONITOR AND ADJUST **

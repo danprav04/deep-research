@@ -125,13 +125,13 @@ try:
     limiter = Limiter(
         get_remote_address,
         app=app,
-        default_limits=[config.DEFAULT_RATE_LIMIT],
-        storage_uri="memory://",  # Use memory storage for simplicity
+        # default_limits=[config.DEFAULT_RATE_LIMIT], # <-- REMOVED THIS LINE
+        storage_uri="memory://",
         strategy="fixed-window",
-        # Enable headers to show rate limit info (optional)
         headers_enabled=True
     )
-    logger.info(f"Rate limiting configured with default: {config.DEFAULT_RATE_LIMIT}")
+    # Update log message to reflect no default limit
+    logger.info(f"Rate limiting configured. Limits applied via route decorators (value: {config.DEFAULT_RATE_LIMIT}).")
 except Exception as e:
     logger.error(f"Failed to initialize Flask-Limiter: {e}", exc_info=True)
     # Consider if the app should stop or continue without rate limiting
@@ -142,13 +142,6 @@ except Exception as e:
 # Validation happens in config.py, critical errors raise ValueError there
 try:
      genai.configure(api_key=config.GOOGLE_API_KEY)
-     # Optional: Check model validity early (might be slow/costly)
-     # try:
-     #     genai.get_model(f'models/{config.GOOGLE_MODEL_NAME}')
-     #     logger.info(f"Google Generative AI model '{config.GOOGLE_MODEL_NAME}' confirmed.")
-     # except Exception as model_err:
-     #     logger.error(f"Failed to verify Google Generative AI model '{config.GOOGLE_MODEL_NAME}': {model_err}")
-     #     # Consider raising an error or just warning
      logger.info(f"Google Generative AI configured with model: {config.GOOGLE_MODEL_NAME}")
 except Exception as e:
      # Log critical error and raise runtime error to prevent app start
@@ -159,12 +152,13 @@ except Exception as e:
 # --- Flask Routes ---
 
 @app.route('/')
+# No @limiter decorator here, so it won't be limited anymore
 def index():
     """Displays the main input form."""
     return render_template('index.html', pico_css=config.PICO_CSS_CDN)
 
 @app.route('/research', methods=['POST'])
-@limiter.limit(config.DEFAULT_RATE_LIMIT) # Apply rate limit
+@limiter.limit(config.DEFAULT_RATE_LIMIT) # Apply specific limit ("1 per minute")
 def research_start():
     """Validates topic and redirects to the results page."""
     topic = request.form.get('topic', '').strip()
@@ -191,7 +185,7 @@ def research_start():
 
 
 @app.route('/stream')
-@limiter.limit(config.DEFAULT_RATE_LIMIT) # Apply rate limit
+@limiter.limit(config.DEFAULT_RATE_LIMIT) # Apply specific limit ("1 per minute")
 def stream():
     """The main SSE route that performs research and streams progress."""
     encoded_topic = request.args.get('topic', '')
@@ -335,6 +329,7 @@ def stream():
 
 
 @app.route('/health')
+# No @limiter decorator here, so it won't be limited anymore
 def health_check():
     """Basic health check endpoint."""
     llm_ok = False
@@ -359,6 +354,7 @@ def health_check():
 
 # --- Favicon Route ---
 @app.route('/favicon.ico')
+# No @limiter decorator here, so it won't be limited anymore
 def favicon():
     # Serve from static folder
     # Use safe join and check existence
@@ -414,9 +410,4 @@ def handle_exception(e):
         # Return the generic 500 error page
         return render_template('500.html'), 500
 
-
 # Note: No `if __name__ == '__main__':` block. Use Gunicorn or Waitress.
-# Example Gunicorn command for production (adjust workers as needed):
-# gunicorn --workers 3 --bind 0.0.0.0:8000 deep_research_app.app:app --access-logfile - --error-logfile -
-# Example Waitress command:
-# waitress-serve --host 0.0.0.0 --port 8000 deep_research_app.app:app
