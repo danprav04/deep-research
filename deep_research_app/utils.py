@@ -1,4 +1,4 @@
-# utils.py
+# deep_research_app/utils.py
 import re
 import json
 import html
@@ -45,7 +45,7 @@ ALLOWED_ATTRS_FOR_LLM = {
 # Initialize with 'gfm-like' preset for common features.
 md_options: OptionsDict = {
     "html": False,       # Disable raw HTML tags in final report Markdown for security
-    "linkify": True,     # Autoconvert URL-like text to links
+    "linkify": False,    # *** DISABLED: Requires linkify-it-py which is not installed ***
     "typographer": True, # Enable smart quotes, dashes, etc.
     "breaks": True,      # Convert single newlines in paragraphs to <br> (GFM style)
 }
@@ -61,7 +61,7 @@ md = (
     .disable('html_inline')
     .disable('html_block')
 )
-logger.info("Markdown-it parser configured for final report rendering (gfm-like, html disabled).")
+logger.info("Markdown-it parser configured for final report rendering (gfm-like, html disabled, linkify disabled).")
 
 
 # --- Functions ---
