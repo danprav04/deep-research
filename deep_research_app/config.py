@@ -38,7 +38,7 @@ LOG_ROTATION_DAYS = int(os.getenv("LOG_ROTATION_DAYS", 14)) # Keep logs for 2 we
 # --- Rate Limiting (Flask Limiter) ---
 # This limit applies ONLY to routes explicitly decorated with @limiter.limit(DEFAULT_RATE_LIMIT)
 # Ensure DEFAULT_RATE_LIMIT env var is unset or matches this if overriding.
-DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "10 per minute") # User's previous value
+DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "1 per minute") # User's previous value
 
 # --- Search Configuration ---
 # Sensible defaults for production, adjustable via environment variables
