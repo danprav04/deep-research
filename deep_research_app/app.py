@@ -392,7 +392,7 @@ def ratelimit_handler(e):
     logger.warning(f"Rate limit exceeded: {e.description} from {remote_addr}")
     return render_template('error.html',
                            error_code=429,
-                           error_message=f"Too many requests received from your IP address ({e.description}). Please wait a moment and try again.",
+                           error_message=f"Too many requests received from you ({e.description}). Please wait a moment and try again.",
                            pico_css=config.PICO_CSS_CDN), 429
 
 @app.errorhandler(404)
@@ -425,7 +425,7 @@ def handle_exception(e):
         elif e.code == 429:
              return render_template('error.html',
                                    error_code=429,
-                                   error_message=f"Too many requests received from your IP address ({e.description}). Please wait.",
+                                   error_message=f"Too many requests received from you ({e.description}). Please wait.",
                                    pico_css=config.PICO_CSS_CDN), 429
         elif e.code >= 500:
              return render_template('500.html', pico_css=config.PICO_CSS_CDN), e.code
