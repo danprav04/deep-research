@@ -42,8 +42,8 @@ DEFAULT_RATE_LIMIT = os.getenv("DEFAULT_RATE_LIMIT", "1 per minute") # User's pr
 
 # --- Search Configuration ---
 # Sensible defaults for production, adjustable via environment variables
-MAX_SEARCH_RESULTS_PER_ENGINE_STEP: int = int(os.getenv("MAX_SEARCH_RESULTS_PER_ENGINE_STEP", 5))
-MAX_TOTAL_URLS_TO_SCRAPE: int = int(os.getenv("MAX_TOTAL_URLS_TO_SCRAPE", 20))
+MAX_SEARCH_RESULTS_PER_ENGINE_STEP: int = int(os.getenv("MAX_SEARCH_RESULTS_PER_ENGINE_STEP", 10))
+MAX_TOTAL_URLS_TO_SCRAPE: int = int(os.getenv("MAX_TOTAL_URLS_TO_SCRAPE", 100))
 MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", 3)) # Adjust based on server CPU/RAM
 REQUEST_TIMEOUT: int = int(os.getenv("REQUEST_TIMEOUT", 15)) # Slightly shorter timeout
 USER_AGENT: str = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")

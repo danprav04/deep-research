@@ -6,11 +6,12 @@ import os
 import traceback
 import logging
 import re
-from typing import Dict, Any, List, Callable, Optional, Tuple, Generator
+from typing import Dict, Any, List, Callable, Optional, Tuple, Generator, Set
 from html import escape
 import concurrent.futures
 from urllib.parse import urlparse
 from google.api_core import exceptions as google_api_exceptions # Import specific exception
+from collections import defaultdict # Used for grouping sources by step
 
 import config as config
 from llm_interface import call_gemini, stream_gemini # Assume RateLimitExceededError might be raised by call_gemini if not handled internally
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Define yielded event structures for clarity
 ProgressEvent = Dict[str, Any] # keys: type='progress', message, is_error, is_fatal
 DataEvent = Dict[str, Any]     # keys: type='event', data={...}
-ScrapeSuccessEvent = Dict[str, Any] # keys: type='scrape_success', metadata={...}
+ScrapeSuccessEvent = Dict[str, Any] # keys: type='scrape_success', metadata={...} (metadata now includes step_index)
 LlmStatusEvent = Dict[str, Any] # keys: type='event', data={'type': 'llm_status', 'status': 'busy'|'retrying', 'message': str}
 
 # Basic Topic Validation Pattern
@@ -36,11 +37,12 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
     """
     Executes the entire research process as a generator, yielding events.
     Includes persistent retry logic for LLM rate limit errors during plan generation.
+    Context preparation for synthesis now attempts to balance sources across research steps.
 
     Yields dictionaries representing different stages and data:
     - {'type': 'progress', 'message': str, 'is_error': bool, 'is_fatal': bool}
     - {'type': 'event', 'data': Dict[str, Any]} (e.g., llm_chunk, stream_start, complete, llm_status)
-    - {'type': 'scrape_success', 'metadata': Dict[str, str]} (incl. temp_filepath)
+    - {'type': 'scrape_success', 'metadata': Dict[str, str]} (incl. temp_filepath and step_index)
 
     Args:
         topic: The research topic.
@@ -49,11 +51,12 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         None. The function yields events until completion or fatal error.
     """
     # --- Research state variables ---
-    scraped_source_metadata_list: List[Dict[str, Any]] = []
+    # grouped_scraped_metadata: Dict[int, List[Dict[str, Any]]] = defaultdict(list) # Stores successful scrapes, grouped by step index
     research_plan: List[Dict[str, Any]] = []
     accumulated_synthesis_md: str = ""
     final_report_markdown: str = ""
-    url_to_index_map: Dict[str, int] = {}
+    # url_to_index_map: Dict[str, int] = {} # Will be generated later from *all* successful scrapes
+    all_successful_scrapes: List[Dict[str, Any]] = [] # Flat list of all successful scrape metadata dicts
     start_time_total = time.time()
     fatal_error_occurred = False
 
@@ -162,18 +165,20 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
              yield {'type': 'progress', 'message': f"  Step {i+1}: {step_desc[:100]}{'...' if len(step_desc)>100 else ''} (Keywords: {step_keywords})", 'is_error': False, 'is_fatal': False}
 
 
-        # === Step 2a: Search and Collect URLs ===
-        # (No changes needed here - web search has its own delays)
+        # === Step 2a: Search and Collect URLs (Track Step Index) ===
         yield {'type': 'progress', 'message': "Starting web search...", 'is_error': False, 'is_fatal': False}
         start_search_time = time.time()
-        all_urls_from_search_step = set()
+        # Store tuples of (url, step_index)
+        urls_with_step_index: List[Tuple[str, int]] = []
+        all_unique_urls_found: Set[str] = set() # Track uniqueness across all steps
         total_search_errors = 0
         total_search_queries_attempted = 0
 
         for i, step in enumerate(research_plan):
-            step_desc = step.get('step', f'Unnamed Step {i+1}')
+            step_index = i
+            step_desc = step.get('step', f'Unnamed Step {step_index+1}')
             keywords = step.get('keywords', [])
-            progress_msg = f"Searching - Step {i+1}/{len(research_plan)}: '{step_desc[:70]}{'...' if len(step_desc)>70 else ''}'"
+            progress_msg = f"Searching - Step {step_index+1}/{len(research_plan)}: '{step_desc[:70]}{'...' if len(step_desc)>70 else ''}'"
             yield {'type': 'progress', 'message': progress_msg, 'is_error': False, 'is_fatal': False}
 
             if not keywords or not isinstance(keywords, list) or not any(kw.strip() for kw in keywords):
@@ -193,9 +198,14 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
                 for err in step_errors:
                     yield {'type': 'progress', 'message': f"    -> Search Warning: {escape(err[:200])}", 'is_error': True, 'is_fatal': False}
 
-            new_urls_count = len(set(step_urls) - all_urls_from_search_step)
-            all_urls_from_search_step.update(step_urls)
-            yield {'type': 'progress', 'message': f"  -> Found {len(step_urls)} URLs ({new_urls_count} new). Total unique: {len(all_urls_from_search_step)}.", 'is_error': False, 'is_fatal': False}
+            new_urls_added_count = 0
+            for url in step_urls:
+                 if url not in all_unique_urls_found:
+                      urls_with_step_index.append((url, step_index))
+                      all_unique_urls_found.add(url)
+                      new_urls_added_count += 1
+
+            yield {'type': 'progress', 'message': f"  -> Found {len(step_urls)} URLs ({new_urls_added_count} new unique added for this step). Total unique: {len(all_unique_urls_found)}.", 'is_error': False, 'is_fatal': False}
 
             if i < len(research_plan) - 1:
                  time.sleep(config.INTER_SEARCH_DELAY_SECONDS)
@@ -203,15 +213,13 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         search_duration = time.time() - start_search_time
         yield {'type': 'progress', 'message': f"Search phase completed in {search_duration:.2f}s.", 'is_error': False, 'is_fatal': False}
         if total_search_errors > 0:
-            yield {'type': 'progress', 'message': f"Collected {len(all_urls_from_search_step)} total unique URLs from {total_search_queries_attempted} queries ({total_search_errors} search errors occurred).", 'is_error': True, 'is_fatal': False}
+            yield {'type': 'progress', 'message': f"Collected {len(all_unique_urls_found)} total unique URLs from {total_search_queries_attempted} queries ({total_search_errors} search errors occurred).", 'is_error': True, 'is_fatal': False}
         else:
-            yield {'type': 'progress', 'message': f"Collected {len(all_urls_from_search_step)} total unique URLs from {total_search_queries_attempted} queries.", 'is_error': False, 'is_fatal': False}
+            yield {'type': 'progress', 'message': f"Collected {len(all_unique_urls_found)} total unique URLs from {total_search_queries_attempted} queries.", 'is_error': False, 'is_fatal': False}
 
-
-        # --- Filter URLs ---
-        # (No changes needed here)
-        urls_to_scrape_list = []
-        skipped_urls = set()
+        # --- Filter URLs (Now working with (url, step_index) tuples) ---
+        urls_to_scrape_with_step: List[Tuple[str, int]] = []
+        skipped_urls_count = 0
         yield {'type': 'progress', 'message': "Filtering URLs for scraping...", 'is_error': False, 'is_fatal': False}
         common_non_content_domains = {
             'youtube.com', 'youtu.be', 'vimeo.com', # Video platforms
@@ -226,9 +234,13 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         }
         common_file_extensions = ('.pdf', '.jpg', '.png', '.gif', '.zip', '.mp4', '.mp3', '.docx', '.xlsx', '.pptx', '.webp', '.svg', '.xml', '.css', '.js', '.jpeg', '.doc', '.xls', '.ppt', '.txt', '.exe', '.dmg', '.iso', '.rar', '.gz', '.tar', '.bz2', '.7z', '.json', '.csv', '.woff', '.woff2', '.ttf', '.eot', '.map')
 
-        for url in sorted(list(all_urls_from_search_step)):
-             if len(urls_to_scrape_list) >= config.MAX_TOTAL_URLS_TO_SCRAPE:
+        # Use the combined list from the search phase
+        sorted_urls_with_step = sorted(urls_with_step_index, key=lambda item: item[1]) # Sort primarily by step index
+
+        for url, step_index in sorted_urls_with_step:
+             if len(urls_to_scrape_with_step) >= config.MAX_TOTAL_URLS_TO_SCRAPE:
                   yield {'type': 'progress', 'message': f"  -> Reached URL scraping limit ({config.MAX_TOTAL_URLS_TO_SCRAPE}). Skipping remaining URLs.", 'is_error': False, 'is_fatal': False}
+                  skipped_urls_count += (len(sorted_urls_with_step) - len(urls_to_scrape_with_step)) # Count remaining as skipped
                   break
              try:
                  lower_url = url.lower()
@@ -242,153 +254,214 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
                                           any(auth_path in lower_url for auth_path in ['login', 'signin', 'register', 'account'])
                  is_local = domain in ['localhost', '127.0.0.1']
                  if not any([is_unwanted_scheme, is_file_extension, is_common_non_content, is_local]):
-                      urls_to_scrape_list.append(url)
+                      urls_to_scrape_with_step.append((url, step_index))
                  else:
-                      skipped_urls.add(url)
+                      skipped_urls_count += 1
                       reason = "unwanted scheme" if is_unwanted_scheme else \
                                "file extension" if is_file_extension else \
                                "common non-content domain/path" if is_common_non_content else \
                                "local address" if is_local else "unknown filter"
-                      logger.debug(f"Filtering: Skipped URL '{url[:70]}...' Reason: {reason}")
+                      logger.debug(f"Filtering: Skipped URL '{url[:70]}...' (Step {step_index+1}) Reason: {reason}")
              except Exception as filter_err:
-                 logger.warning(f"Error during URL filtering for '{url[:70]}...': {filter_err}", exc_info=False)
-                 skipped_urls.add(url)
+                 logger.warning(f"Error during URL filtering for '{url[:70]}...' (Step {step_index+1}): {filter_err}", exc_info=False)
+                 skipped_urls_count += 1
 
-        yield {'type': 'progress', 'message': f"Selected {len(urls_to_scrape_list)} URLs for scraping after filtering ({len(skipped_urls)} skipped, limit was {config.MAX_TOTAL_URLS_TO_SCRAPE}).", 'is_error': False, 'is_fatal': False}
+        yield {'type': 'progress', 'message': f"Selected {len(urls_to_scrape_with_step)} URLs for scraping after filtering ({skipped_urls_count} skipped, limit was {config.MAX_TOTAL_URLS_TO_SCRAPE}).", 'is_error': False, 'is_fatal': False}
 
-        if not urls_to_scrape_list:
+        if not urls_to_scrape_with_step:
              logger.error("No suitable URLs found to scrape after search and filtering.")
              yield {'type': 'progress', 'message': "Fatal Error: No suitable URLs found to scrape. Cannot proceed. Try broadening the topic or checking search engine status.", 'is_error': True, 'is_fatal': True}
              fatal_error_occurred = True
              return # Stop generation
 
 
-        # === Step 2b: Scrape URLs Concurrently ===
-        # (No changes needed here)
+        # === Step 2b: Scrape URLs Concurrently (Track Step Index) ===
         yield {'type': 'progress', 'message': f"Starting concurrent scraping ({config.MAX_WORKERS} workers)...", 'is_error': False, 'is_fatal': False}
         start_scrape_time = time.time()
-        scraped_source_metadata_list = [] # Reset before scraping
+        grouped_scraped_metadata: Dict[int, List[Dict[str, Any]]] = defaultdict(list) # Group by step index
+        all_successful_scrapes = [] # Reset flat list
         processed_scrape_count = 0
         successful_scrape_count = 0
         scrape_errors = []
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=config.MAX_WORKERS, thread_name_prefix="Scraper") as executor:
-            future_to_url = {executor.submit(scrape_url, url): url for url in urls_to_scrape_list}
-            for future in concurrent.futures.as_completed(future_to_url):
-                url = future_to_url[future]
+            # Map future back to (url, step_index)
+            future_to_info = {executor.submit(scrape_url, url): (url, step_idx) for url, step_idx in urls_to_scrape_with_step}
+
+            for future in concurrent.futures.as_completed(future_to_info):
+                url, step_index = future_to_info[future]
+                log_url_snippet = f"{url[:60]}... (Step {step_index+1})"
                 processed_scrape_count += 1
                 try:
                     result_dict = future.result()
                     if result_dict and 'temp_filepath' in result_dict and result_dict['temp_filepath']:
                         if os.path.exists(result_dict['temp_filepath']):
-                            scraped_source_metadata_list.append(result_dict)
+                            # Add step_index to the result metadata before yielding/storing
+                            result_dict['step_index'] = step_index
+                            grouped_scraped_metadata[step_index].append(result_dict)
+                            all_successful_scrapes.append(result_dict) # Add to flat list as well
                             successful_scrape_count += 1
-                            yield {'type': 'scrape_success', 'metadata': result_dict}
+                            yield {'type': 'scrape_success', 'metadata': result_dict} # Yield includes step_index now
                         else:
-                            logger.warning(f"Scrape task for {url[:70]}... reported success but temp file missing: {result_dict['temp_filepath']}")
-                            scrape_errors.append(f"Temp file missing for {url[:70]}...")
+                            logger.warning(f"Scrape task for {log_url_snippet} reported success but temp file missing: {result_dict['temp_filepath']}")
+                            scrape_errors.append(f"Temp file missing for {log_url_snippet}")
                 except Exception as exc:
-                    logger.error(f"Unexpected error in scraping task future for {url[:70]}...: {exc}", exc_info=True)
-                    err_msg = f"Scrape task failed for {url[:60]}...: {type(exc).__name__}"
+                    logger.error(f"Unexpected error in scraping task future for {log_url_snippet}: {exc}", exc_info=True)
+                    err_msg = f"Scrape task failed for {log_url_snippet}: {type(exc).__name__}"
                     scrape_errors.append(err_msg)
                     yield {'type': 'progress', 'message': f"    -> {err_msg}", 'is_error': True, 'is_fatal': False}
 
-                if processed_scrape_count % 5 == 0 or processed_scrape_count == len(urls_to_scrape_list):
-                      progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_list)
-                      yield {'type': 'progress', 'message': f"  -> Scraping Progress: {processed_scrape_count}/{len(urls_to_scrape_list)} URLs processed ({progress_perc}%). Successful: {successful_scrape_count}", 'is_error': False, 'is_fatal': False}
+                if processed_scrape_count % 5 == 0 or processed_scrape_count == len(urls_to_scrape_with_step):
+                      progress_perc = (processed_scrape_count * 100) // len(urls_to_scrape_with_step)
+                      yield {'type': 'progress', 'message': f"  -> Scraping Progress: {processed_scrape_count}/{len(urls_to_scrape_with_step)} URLs processed ({progress_perc}%). Successful: {successful_scrape_count}", 'is_error': False, 'is_fatal': False}
 
         scrape_duration = time.time() - start_scrape_time
         yield {'type': 'progress', 'message': f"Scraping finished in {scrape_duration:.2f}s. Successfully scraped and sanitized content from {successful_scrape_count} URLs.", 'is_error': False, 'is_fatal': False}
         if scrape_errors:
              yield {'type': 'progress', 'message': f"  -> Encountered {len(scrape_errors)} errors during scraping.", 'is_error': True, 'is_fatal': False}
 
-        if not scraped_source_metadata_list:
+        if not all_successful_scrapes: # Check if the flat list is empty
             logger.error("Failed to scrape any usable content successfully after sanitization and filtering.")
             yield {'type': 'progress', 'message': "Fatal Error: Failed to gather sufficient web content after scraping and filtering. Cannot proceed with synthesis.", 'is_error': True, 'is_fatal': True}
             fatal_error_occurred = True
             return # Stop generation
 
-        scraped_url_map = {item['url']: item for item in scraped_source_metadata_list}
-        ordered_scraped_metadata_list = [scraped_url_map[url] for url in urls_to_scrape_list if url in scraped_url_map]
-        scraped_source_metadata_list = ordered_scraped_metadata_list
-
 
         # === Step 3: Generate Bibliography Map ===
-        # (No changes needed here)
-        url_to_index_map, bibliography_prompt_list = generate_bibliography_map(scraped_source_metadata_list)
+        # Use the flat list of all successful scrapes for bibliography
+        url_to_index_map, bibliography_prompt_list = generate_bibliography_map(all_successful_scrapes)
         yield {'type': 'progress', 'message': f"Generated bibliography map for {len(url_to_index_map)} successfully processed sources.", 'is_error': False, 'is_fatal': False}
 
 
-        # === Step 4: Synthesize Information (Streaming, RAM Optimized) ===
-        yield {'type': 'progress', 'message': f"Synthesizing information from {len(scraped_source_metadata_list)} sources using {config.GOOGLE_MODEL_NAME}...", 'is_error': False, 'is_fatal': False}
+        # === Step 4: Synthesize Information (Streaming, RAM Optimized, Step-Balanced Context) ===
+        yield {'type': 'progress', 'message': f"Synthesizing information from {successful_scrape_count} sources using {config.GOOGLE_MODEL_NAME}...", 'is_error': False, 'is_fatal': False}
         yield {'type': 'event', 'data': {'type': 'stream_start', 'target': 'synthesis'}}
 
-        # --- Prepare Context (No changes needed here) ---
+        # --- Prepare Context (NEW: Round-Robin across steps) ---
         context_for_llm_parts = []
         current_total_chars = 0
         sources_included_count = 0
         skipped_sources_count = 0
-        yield {'type': 'progress', 'message': f"  -> Preparing context for synthesis (limit ~{config.MAX_CONTEXT_CHARS // 1000}k chars)...", 'is_error': False, 'is_fatal': False}
-        for source_metadata in scraped_source_metadata_list:
-            filepath = source_metadata.get('temp_filepath')
-            url = source_metadata.get('url')
-            content = None
-            if not filepath or not url or not os.path.exists(filepath):
-                 logger.warning(f"Skipping source for synthesis (missing temp file/metadata). URL: {url or 'Unknown'}, Path: {filepath}")
-                 yield {'type': 'progress', 'message': f"  -> Warning: Skipping source, missing temp file or metadata for URL {url or 'Unknown'}", 'is_error': True, 'is_fatal': False}
-                 skipped_sources_count += 1
-                 continue
-            try:
-                 file_size = os.path.getsize(filepath)
-                 if file_size == 0:
-                      logger.warning(f"Skipping empty temp file {os.path.basename(filepath)} for {url[:60]}...")
-                      yield {'type': 'progress', 'message': f"  -> Warning: Skipping empty temp file for {url[:60]}...", 'is_error': True, 'is_fatal': False}
-                      skipped_sources_count += 1
-                      continue
-                 estimated_addition = len(url) + file_size + 50
-                 if (current_total_chars + estimated_addition) <= config.MAX_CONTEXT_CHARS:
-                     try:
-                         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                             content = f.read()
-                         if content and content.strip():
-                             context_for_llm_parts.append({'url': url, 'content': content})
-                             current_total_chars += estimated_addition
-                             sources_included_count += 1
-                         else:
-                             logger.warning(f"Read empty or whitespace-only content from temp file {os.path.basename(filepath)} for {url[:60]}... (Post-Sanitization Check)")
-                             yield {'type': 'progress', 'message': f"  -> Warning: Read empty content from temp file for {url[:60]}...", 'is_error': True, 'is_fatal': False}
-                             skipped_sources_count += 1
-                     except Exception as read_err:
-                         logger.error(f"Error reading temp file {os.path.basename(filepath)} for {url[:60]}: {read_err}", exc_info=False)
-                         yield {'type': 'progress', 'message': f"  -> Error reading temp file for {url[:60]}...: {escape(str(read_err))}", 'is_error': True, 'is_fatal': False}
-                         skipped_sources_count += 1
-                 else:
-                      logger.warning(f"Context limit ({config.MAX_CONTEXT_CHARS // 1000}k chars) reached. Stopping context build. Included {sources_included_count} sources.")
-                      yield {'type': 'progress', 'message': f"  -> Context limit reached. Synthesizing based on first {sources_included_count}/{len(scraped_source_metadata_list)} sources (~{current_total_chars // 1000}k chars).", 'is_error': True, 'is_fatal': False}
-                      skipped_sources_count += (len(scraped_source_metadata_list) - sources_included_count)
-                      break
-            except OSError as e:
-                 logger.error(f"Error accessing temp file {os.path.basename(filepath)} for {url[:60]}...: {e}", exc_info=False)
-                 yield {'type': 'progress', 'message': f"  -> Error accessing temp file metadata for {url[:60]}...: {escape(str(e))}", 'is_error': True, 'is_fatal': False}
-                 skipped_sources_count += 1
-            except Exception as e:
-                 logger.error(f"Unexpected error processing temp file {os.path.basename(filepath)} for {url[:60]}...: {e}", exc_info=False)
-                 yield {'type': 'progress', 'message': f"  -> Unexpected error processing temp file for {url[:60]}...: {escape(str(e))}", 'is_error': True, 'is_fatal': False}
-                 skipped_sources_count += 1
-            finally:
-                 del content
+        context_build_start_time = time.time()
+
+        yield {'type': 'progress', 'message': f"  -> Preparing context for synthesis (limit ~{config.MAX_CONTEXT_CHARS // 1000}k chars, balancing across {len(grouped_scraped_metadata)} steps)...", 'is_error': False, 'is_fatal': False}
+
+        # Determine the order of steps (e.g., 0, 1, 2...)
+        step_indices_with_sources = sorted(grouped_scraped_metadata.keys())
+        # Track the next source index to pick from each step's list
+        next_source_index_per_step = {step_idx: 0 for step_idx in step_indices_with_sources}
+        # Track how many sources remain for each step
+        remaining_sources_per_step = {step_idx: len(grouped_scraped_metadata[step_idx]) for step_idx in step_indices_with_sources}
+        total_sources_available = sum(remaining_sources_per_step.values())
+        context_limit_reached = False
+
+        # Loop while context limit not reached AND there are sources left to consider
+        while not context_limit_reached and sum(remaining_sources_per_step.values()) > 0:
+            made_progress_this_round = False # Track if we added anything in a full pass
+            for step_idx in step_indices_with_sources:
+                if context_limit_reached: break # Stop immediately if limit hit mid-round
+
+                current_source_idx = next_source_index_per_step[step_idx]
+                if current_source_idx < len(grouped_scraped_metadata[step_idx]):
+                    # There's a source available for this step
+                    source_metadata = grouped_scraped_metadata[step_idx][current_source_idx]
+                    filepath = source_metadata.get('temp_filepath')
+                    url = source_metadata.get('url')
+                    log_url_snippet = f"{url[:60]}... (Step {step_idx+1})"
+
+                    if not filepath or not url or not os.path.exists(filepath):
+                        logger.warning(f"Skipping source for synthesis (missing temp file/metadata). URL: {log_url_snippet}, Path: {filepath}")
+                        # Don't yield progress here to avoid flooding, logged above
+                        skipped_sources_count += 1
+                        remaining_sources_per_step[step_idx] -= 1 # Decrement remaining for this step
+                        next_source_index_per_step[step_idx] += 1 # Move to next source index for this step
+                        continue
+
+                    try:
+                        file_size = os.path.getsize(filepath)
+                        if file_size == 0:
+                            logger.warning(f"Skipping empty temp file {os.path.basename(filepath)} for {log_url_snippet}")
+                            skipped_sources_count += 1
+                            remaining_sources_per_step[step_idx] -= 1
+                            next_source_index_per_step[step_idx] += 1
+                            continue
+
+                        # Estimate characters: URL len + file content size + small overhead
+                        # Note: File size is bytes, roughly equivalent to chars for ASCII/UTF-8 common chars
+                        estimated_addition = len(url) + file_size + 50
+
+                        if (current_total_chars + estimated_addition) <= config.MAX_CONTEXT_CHARS:
+                            # Read content (only if it fits)
+                            content = None
+                            try:
+                                with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = f.read()
+                                if content and content.strip():
+                                    context_for_llm_parts.append({'url': url, 'content': content})
+                                    current_total_chars += estimated_addition # Use estimate for consistency
+                                    sources_included_count += 1
+                                    next_source_index_per_step[step_idx] += 1 # Successfully added, move to next source
+                                    remaining_sources_per_step[step_idx] -= 1
+                                    made_progress_this_round = True
+                                    logger.debug(f"Added source {log_url_snippet} to context. Total chars ~{current_total_chars // 1000}k.")
+                                else:
+                                    logger.warning(f"Read empty or whitespace-only content from temp file {os.path.basename(filepath)} for {log_url_snippet} (Post-Sanitization Check)")
+                                    skipped_sources_count += 1
+                                    remaining_sources_per_step[step_idx] -= 1
+                                    next_source_index_per_step[step_idx] += 1 # Skip this source
+                            except Exception as read_err:
+                                logger.error(f"Error reading temp file {os.path.basename(filepath)} for {log_url_snippet}: {read_err}", exc_info=False)
+                                skipped_sources_count += 1
+                                remaining_sources_per_step[step_idx] -= 1
+                                next_source_index_per_step[step_idx] += 1 # Skip this source
+                            finally:
+                                del content # Free memory from content string
+                        else:
+                            # This source doesn't fit, context limit is effectively reached
+                            logger.warning(f"Context limit ({config.MAX_CONTEXT_CHARS // 1000}k chars) reached. Could not add source {log_url_snippet} (needs ~{estimated_addition // 1000}k chars, have ~{(config.MAX_CONTEXT_CHARS - current_total_chars) // 1000}k left).")
+                            context_limit_reached = True
+                            # Don't increment next_source_index_per_step - we didn't process this one
+                            # Don't decrement remaining_sources_per_step - it's still available if limit increases
+                            break # Break inner loop (steps)
+
+                    except OSError as e:
+                        logger.error(f"Error accessing temp file metadata {os.path.basename(filepath)} for {log_url_snippet}: {e}", exc_info=False)
+                        skipped_sources_count += 1
+                        remaining_sources_per_step[step_idx] -= 1
+                        next_source_index_per_step[step_idx] += 1
+                    except Exception as e:
+                        logger.error(f"Unexpected error processing temp file {os.path.basename(filepath)} for {log_url_snippet}: {e}", exc_info=False)
+                        skipped_sources_count += 1
+                        remaining_sources_per_step[step_idx] -= 1
+                        next_source_index_per_step[step_idx] += 1
+                # else: No more sources left for this step_idx
+
+            # End of round-robin pass through steps
+            if not made_progress_this_round and not context_limit_reached:
+                # If we went through all steps and added nothing, and the limit isn't reached,
+                # it means all remaining sources were individually too large to fit.
+                logger.warning("Context preparation finished: No remaining sources could fit within the context limit.")
+                break # Exit the while loop
+
+        context_build_duration = time.time() - context_build_start_time
+        logger.info(f"Context preparation took {context_build_duration:.2f}s.")
+
+        skipped_sources_count += sum(remaining_sources_per_step.values()) # Add remaining unprocessed sources to skipped count
+
         if sources_included_count == 0:
              logger.error("No source content could be prepared for synthesis after reading temp files.")
              yield {'type': 'progress', 'message': "Fatal Error: No source content available for synthesis. Cannot proceed.", 'is_error': True, 'is_fatal': True}
              fatal_error_occurred = True
              return # Stop generation
+
         if skipped_sources_count > 0:
-             yield {'type': 'progress', 'message': f"  -> Note: Skipped {skipped_sources_count} sources during context preparation due to errors, size limits, or missing files.", 'is_error': True, 'is_fatal': False}
+             yield {'type': 'progress', 'message': f"  -> Context includes {sources_included_count} sources. Skipped {skipped_sources_count}/{total_sources_available} sources due to errors, size limits, or empty content.", 'is_error': True, 'is_fatal': False}
         estimated_tokens = current_total_chars / config.CHARS_PER_TOKEN_ESTIMATE
         yield {'type': 'progress', 'message': f"  -> Prepared synthesis context using {sources_included_count} sources (~{current_total_chars // 1000}k chars / ~{estimated_tokens / 1000:.1f}k est. tokens).", 'is_error': False, 'is_fatal': False}
+
         try:
             context_json_str = json.dumps(context_for_llm_parts, indent=None, ensure_ascii=False, separators=(',', ':'))
-            del context_for_llm_parts
+            del context_for_llm_parts # Free memory
             actual_context_chars = len(context_json_str)
             logger.info(f"Actual serialized context size: {actual_context_chars // 1000}k chars.")
             if actual_context_chars > config.MAX_CONTEXT_CHARS * 1.1:
@@ -459,7 +532,7 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
                     if synthesis_stream_fatal:
                         fatal_error_occurred = True
                         return # Stop generation
-                    break
+                    # Don't break here if not fatal, allow process to continue to report phase maybe?
                 elif event_type == 'stream_warning':
                      msg = result.get('message', 'Unknown stream warning')
                      logger.warning(f"LLM Stream Warning (Synthesis): {msg}")
@@ -470,7 +543,7 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
                      if reason not in ["STOP", "MAX_TOKENS", "1", "2", None, 0, "FINISH_REASON_UNSPECIFIED"]: # Added 0/UNSPECIFIED
                          logger.warning(f"Synthesis stream finished with non-standard reason: {reason}")
                          yield {'type': 'progress', 'message': f"Warning: Synthesis stream finished with reason: {reason}. Output might be incomplete.", 'is_error': True, 'is_fatal': False}
-                     break
+                     break # Exit loop on stream end
         except Exception as e:
              logger.error(f"Fatal error processing LLM synthesis stream: {e}", exc_info=True)
              yield {'type': 'progress', 'message': f"Fatal Error: Unexpected issue during information synthesis ({type(e).__name__}).", 'is_error': True, 'is_fatal': True}
@@ -492,23 +565,33 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         yield {'type': 'progress', 'message': f"Generating final report using {config.GOOGLE_MODEL_NAME}...", 'is_error': False, 'is_fatal': False}
         yield {'type': 'event', 'data': {'type': 'stream_start', 'target': 'report'}}
 
-        # --- Prepare Report Prompt (No changes needed here) ---
+        # --- Prepare Report Prompt (Check context size for synthesis part) ---
+        truncated_synthesis_md = ""
         try:
+            # Estimate size of fixed parts of the prompt
             plan_json_compact = json.dumps(research_plan, separators=(',', ':'))
+            # Estimate base length: topic, plan, bibliography string, fixed instruction text (~3k)
             base_prompt_elements_len = (
                 len(topic) + len(plan_json_compact) + len(bibliography_prompt_list) + 3000
             )
-        except Exception as json_err:
-             logger.error(f"Error estimating report prompt base length: {json_err}")
-             base_prompt_elements_len = 5000
-        available_chars_for_synthesis_in_report = config.MAX_CONTEXT_CHARS - base_prompt_elements_len
-        if len(accumulated_synthesis_md) > available_chars_for_synthesis_in_report:
-            chars_to_keep = max(0, available_chars_for_synthesis_in_report - 500)
-            truncated_synthesis_md = accumulated_synthesis_md[:chars_to_keep] + "\n\n... [Synthesis truncated due to context limits for final report generation]"
-            logger.warning(f"Truncating synthesis markdown (from {len(accumulated_synthesis_md)} to {len(truncated_synthesis_md)} chars) for report prompt.")
-            yield {'type': 'progress', 'message': "  -> Warning: Synthesized text truncated for final report generation due to context limits. Report might be incomplete.", 'is_error': True, 'is_fatal': False}
-        else:
-            truncated_synthesis_md = accumulated_synthesis_md
+
+            # Calculate space available for the synthesized markdown
+            available_chars_for_synthesis_in_report = config.MAX_CONTEXT_CHARS - base_prompt_elements_len
+
+            if len(accumulated_synthesis_md) > available_chars_for_synthesis_in_report:
+                # Ensure chars_to_keep is not negative
+                chars_to_keep = max(0, available_chars_for_synthesis_in_report)
+                truncated_synthesis_md = accumulated_synthesis_md[:chars_to_keep] + "\n\n... [Synthesis truncated due to context limits for final report generation]"
+                logger.warning(f"Truncating synthesis markdown (from {len(accumulated_synthesis_md)} to {len(truncated_synthesis_md)} chars) for report prompt.")
+                yield {'type': 'progress', 'message': "  -> Warning: Synthesized text truncated for final report generation due to context limits. Report might be incomplete.", 'is_error': True, 'is_fatal': False}
+            else:
+                truncated_synthesis_md = accumulated_synthesis_md
+        except Exception as e:
+             logger.error(f"Error preparing report prompt (truncation check): {e}", exc_info=True)
+             yield {'type': 'progress', 'message': f"Error preparing report prompt: {escape(str(e))}", 'is_error': True, 'is_fatal': False}
+             # Fallback: Use potentially untruncated synthesis if calculation failed
+             truncated_synthesis_md = accumulated_synthesis_md
+
 
         # --- Report Prompt ---
         report_system_prompt = f"""
@@ -570,8 +653,9 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         """
         del accumulated_synthesis_md
         del truncated_synthesis_md
-        del research_plan
-        del bibliography_prompt_list
+        # Keep research_plan and bibliography_prompt_list if needed for debugging, otherwise del
+        # del research_plan
+        # del bibliography_prompt_list
 
         # --- Execute Report Stream (Now handles rate limit retries internally) ---
         final_report_markdown = ""
@@ -595,7 +679,7 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
                     if report_stream_fatal:
                         fatal_error_occurred = True
                         return # Stop generation
-                    break
+                    # Don't break if not fatal
                 elif event_type == 'stream_warning':
                      msg = result.get('message', 'Unknown stream warning')
                      logger.warning(f"LLM Stream Warning (Report): {msg}")
@@ -606,7 +690,7 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
                      if reason not in ["STOP", "MAX_TOKENS", "1", "2", None, 0, "FINISH_REASON_UNSPECIFIED"]: # Added 0/UNSPECIFIED
                          logger.warning(f"Report stream finished with non-standard reason: {reason}")
                          yield {'type': 'progress', 'message': f"Warning: Report stream finished with reason: {reason}. Output might be incomplete.", 'is_error': True, 'is_fatal': False}
-                     break
+                     break # Exit loop on stream end
         except Exception as e:
              logger.error(f"Fatal error processing LLM report stream: {e}", exc_info=True)
              yield {'type': 'progress', 'message': f"Fatal Error: Unexpected issue during final report generation ({type(e).__name__}).", 'is_error': True, 'is_fatal': True}
@@ -630,27 +714,27 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         yield {'type': 'progress', 'message': "Processing final report for display...", 'is_error': False, 'is_fatal': False}
 
         # --- Strip potential Markdown code fences ---
-        # (No changes needed here)
         cleaned_report_markdown = final_report_markdown.strip()
         if cleaned_report_markdown.startswith("```markdown") and cleaned_report_markdown.endswith("```"):
              cleaned_report_markdown = cleaned_report_markdown[len("```markdown"): -len("```")].strip()
              logger.info("Stripped surrounding ```markdown fences from the final report.")
         elif cleaned_report_markdown.startswith("```") and cleaned_report_markdown.endswith("```"):
              possible_content = cleaned_report_markdown[3:-3].strip()
-             if not possible_content.startswith('#'):
-                  logger.info("Stripped surrounding ``` fences from the final report.")
+             # Heuristic: If the content inside starts like a report, keep the fences, otherwise strip.
+             if not possible_content.startswith(('#', '##')): # Check if it starts with markdown headings
+                  logger.info("Stripped surrounding ``` fences from the final report (content didn't start with heading).")
                   cleaned_report_markdown = possible_content
              else:
                   logger.info("Detected ``` fences, but content looks like the report itself. Keeping fences.")
         final_report_markdown = cleaned_report_markdown
 
         # --- Convert Markdown to HTML ---
-        # (No changes needed here)
         report_html = convert_markdown_to_html(final_report_markdown)
-        if report_html.strip().lower().startswith(('<p><em>report content is empty', '<pre><strong>error', '<p><em>markdown conversion resulted', 'report generation failed')):
+        if report_html.strip().lower().startswith(('<p><em>report content is empty', '<pre><strong>error', '<p><em>markdown conversion resulted', 'report generation failed', '<h2>report display error</h2>')):
             logger.error("Final Markdown report content seems invalid or conversion failed.")
             yield {'type': 'progress', 'message': "Error preparing final report for display. Check logs.", 'is_error': True, 'is_fatal': False}
-            if not report_html.strip():
+            # Ensure error HTML is used if conversion failed
+            if not report_html.strip() or "conversion resulted in empty html" in report_html.lower():
                  report_html = f"<h2>Report Display Error</h2><p>Could not convert report Markdown to HTML. Raw Markdown content:</p><pre><code>{escape(final_report_markdown)}</code></pre>"
         elif not report_html.strip():
              logger.error("Markdown conversion resulted in empty HTML unexpectedly.")
@@ -659,7 +743,6 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
 
 
         # --- Yield Final Data Package ---
-        # (No changes needed here)
         yield {'type': 'progress', 'message': "Sending final results to client...", 'is_error': False, 'is_fatal': False}
         final_data = {
             'type': 'complete',
@@ -673,18 +756,22 @@ def run_research_process(topic: str) -> Generator[Dict[str, Any], None, None]:
         yield {'type': 'progress', 'message': f"Research process completed successfully in {total_duration:.2f} seconds.", 'is_error': False, 'is_fatal': False}
 
     except Exception as e:
-        # Catch-all for unexpected errors
+        # Catch-all for unexpected errors during orchestration
         logger.error(f"FATAL: Unhandled exception in research orchestrator for topic '{topic}': {e}", exc_info=True)
         error_msg = "An unexpected server error occurred during research orchestration. Please check server logs for details."
         if not fatal_error_occurred:
             try:
+                 # Yield fatal error only if one wasn't already yielded
                  yield {'type': 'progress', 'message': error_msg, 'is_error': True, 'is_fatal': True}
             except Exception as callback_err:
+                 # Log failure to yield, but avoid raising further errors
                  logger.critical(f"Failed to yield final fatal error message in orchestrator: {callback_err}")
-        fatal_error_occurred = True
+        fatal_error_occurred = True # Ensure flag is set
     finally:
-        # Cleanup is handled by app.py using scrape_success events
+        # Cleanup (temp files) is handled by app.py using scrape_success events & tracking filepaths
         if fatal_error_occurred:
             logger.error(f"Orchestrator generator stopped prematurely due to fatal error for topic: '{topic}'.")
         else:
             logger.info(f"Orchestrator generator finished executing for topic: '{topic}'.")
+        # Signal generator termination (useful for cleanup coordination if needed later)
+        # The app.py stream handler now sends a 'stream_terminated' event in its finally block.
